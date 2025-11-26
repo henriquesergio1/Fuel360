@@ -1,1 +1,0 @@
-// DELETED: Configuração migrada para variáveis de ambiente.

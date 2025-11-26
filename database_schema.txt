@@ -42,6 +42,17 @@ BEGIN
 END
 GO
 
+-- Inserção de usuário padrão caso a tabela esteja vazia (Senha: admin)
+-- Nota: O hash abaixo é um exemplo e pode não funcionar dependendo do SALT do bcrypt.
+-- O ideal é deixar a API criar o usuário via seedDefaultUser() na inicialização.
+IF NOT EXISTS (SELECT * FROM Usuarios)
+BEGIN
+    -- Hash gerado para 'admin' com 10 rounds
+    INSERT INTO Usuarios (Nome, Usuario, SenhaHash, Perfil, Ativo) 
+    VALUES ('Administrador Padrão', 'admin', '$2a$10$X.x.x.x.x.x.x.x', 'Admin', 1);
+END
+GO
+
 -- ---------------------------------------------------------------------------------
 -- TABELAS DE NEGÓCIO (FUEL360)
 -- ---------------------------------------------------------------------------------

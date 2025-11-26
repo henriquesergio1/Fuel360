@@ -58,6 +58,34 @@ function executeQuery(config, query, params = []) {
   });
 }
 
+// --- ROTINA DE SEED (USUÁRIO PADRÃO) ---
+async function seedDefaultUser() {
+    try {
+        // Verifica se tabela existe primeiro para não quebrar em banco vazio sem tabelas
+        const checkTable = "SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Usuarios'";
+        const { rows: tableRows } = await executeQuery(dbConfig, checkTable);
+        
+        if (tableRows.length > 0) {
+            const { rows } = await executeQuery(dbConfig, "SELECT COUNT(*) as count FROM Usuarios");
+            if (rows[0].count === 0) {
+                console.log("⚠️ Tabela de usuários vazia. Criando usuário 'admin' padrão...");
+                const hashedPassword = await bcrypt.hash('admin', SALT_ROUNDS);
+                const query = `INSERT INTO Usuarios (Nome, Usuario, SenhaHash, Perfil, Ativo) VALUES (@nome, @user, @pass, @perfil, 1)`;
+                const params = [
+                    { name: 'nome', type: TYPES.NVarChar, value: 'Administrador Sistema' },
+                    { name: 'user', type: TYPES.NVarChar, value: 'admin' },
+                    { name: 'pass', type: TYPES.NVarChar, value: hashedPassword },
+                    { name: 'perfil', type: TYPES.NVarChar, value: 'Admin' }
+                ];
+                await executeQuery(dbConfig, query, params);
+                console.log("✅ Usuário 'admin' criado com sucesso (Senha: admin).");
+            }
+        }
+    } catch (err) {
+        console.error("Erro ao verificar/criar usuário padrão:", err.message);
+    }
+}
+
 const app = express();
 
 // CORS Explícito
@@ -618,4 +646,8 @@ app.post('/logs', authenticateToken, async (req, res) => {
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-app.listen(port, () => console.log(`API Fuel360 rodando na porta ${port}`));
+app.listen(port, () => {
+    console.log(`API Fuel360 rodando na porta ${port}`);
+    // Tenta seedar o usuário padrão ao iniciar
+    seedDefaultUser();
+});

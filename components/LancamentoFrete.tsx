@@ -1,1 +1,0 @@
-// DELETED: Componente descontinuado no Fuel360.
