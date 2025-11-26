@@ -2,51 +2,36 @@
 version: '3.8'
 
 services:
-  fretes-api:
+  fuel360-api:
     build:
       context: ./api
       dockerfile: Dockerfile.txt
-    container_name: fretes-api
+    container_name: fuel360-api
     restart: unless-stopped
     ports:
       # Mapeia a porta 3000 do container para a porta 3030 do seu servidor.
-      # Se a porta 3030 já estiver em uso no seu servidor, mude o primeiro número (ex: "3031:3000").
       - "3030:3000"
     
     # As variáveis de ambiente (senhas, etc.) devem ser configuradas diretamente
     # no Portainer ou em um arquivo .env na mesma pasta do docker-compose.
     environment:
       - API_PORT=3000
-      # Segredo para assinatura de Tokens (Login e Licença). Mude isso em produção!
-      - JWT_SECRET=${JWT_SECRET:-fretes-secret-key-change-in-prod}
+      - JWT_SECRET=${JWT_SECRET:-fuel360-secret-key-change-in-prod}
       
-      # Conexão Principal (Banco Fretes) - Padrão Novo
-      - DB_SERVER_FRETE=${DB_SERVER_FRETE}
-      - DB_DATABASE_FRETE=${DB_DATABASE_FRETE}
-      - DB_USER_FRETE=${DB_USER_FRETE}
-      - DB_PASSWORD_FRETE=${DB_PASSWORD_FRETE}
+      # Conexão Principal (Banco Fuel360)
+      - DB_SERVER_FUEL360=${DB_SERVER_FUEL360}
+      - DB_DATABASE_FUEL360=${DB_DATABASE_FUEL360}
+      - DB_USER_FUEL360=${DB_USER_FUEL360}
+      - DB_PASSWORD_FUEL360=${DB_PASSWORD_FUEL360}
 
-      # Fallback: Mantendo variáveis antigas (ODIN) para não quebrar configs salvas no Portainer
-      - DB_SERVER_ODIN=${DB_SERVER_ODIN}
-      - DB_DATABASE_ODIN=${DB_DATABASE_ODIN}
-      - DB_USER_ODIN=${DB_USER_ODIN}
-      - DB_PASSWORD_ODIN=${DB_PASSWORD_ODIN}
-      
-      # Conexão Legada (ERP)
-      - DB_SERVER_ERP=${DB_SERVER_ERP}
-      - DB_DATABASE_ERP=${DB_DATABASE_ERP}
-      - DB_USER_ERP=${DB_USER_ERP}
-      - DB_PASSWORD_ERP=${DB_PASSWORD_ERP}
-
-  fretes-frontend:
+  fuel360-frontend:
     build:
       context: . # Constrói a imagem a partir da raiz do projeto
       dockerfile: Dockerfile.txt
-    container_name: fretes-frontend
+    container_name: fuel360-frontend
     restart: unless-stopped
     ports:
       # Mapeia a porta 80 do container para a porta 8080 do servidor.
-      # Acesse o frontend em http://[IP_DO_SERVIDOR]:8080
       - "8080:80"
     depends_on:
-      - fretes-api
+      - fuel360-api

@@ -2,7 +2,7 @@
 import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia } from '../types.ts';
 import * as mockApi from '../api/mockData.ts';
 
-declare global { interface Window { __FRETE_MODO_MOCK__?: boolean; } }
+declare global { interface Window { __FUEL360_MODO_MOCK__?: boolean; } }
 
 const getStoredMode = (): boolean | null => {
     try {
@@ -14,7 +14,7 @@ const getStoredMode = (): boolean | null => {
 };
 
 const getHtmlConfig = (): boolean => {
-    if (typeof window !== 'undefined' && window.__FRETE_MODO_MOCK__ !== undefined) return window.__FRETE_MODO_MOCK__;
+    if (typeof window !== 'undefined' && window.__FUEL360_MODO_MOCK__ !== undefined) return window.__FUEL360_MODO_MOCK__;
     return false;
 };
 
@@ -68,7 +68,7 @@ const apiRequest = async (endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DE
     const isLogin = endpoint === '/login';
     
     const licenseStatus = response.headers.get('X-License-Status');
-    if (licenseStatus === 'EXPIRED') window.dispatchEvent(new CustomEvent('FRETE360_LICENSE_EXPIRED'));
+    if (licenseStatus === 'EXPIRED') window.dispatchEvent(new CustomEvent('FUEL360_LICENSE_EXPIRED'));
 
     return handleResponse(response, isLogin);
 };

@@ -13,20 +13,21 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swaggerConfig');
 
 // --- Configurações de Segurança ---
-const JWT_SECRET = process.env.JWT_SECRET || 'fretes-secret-key-change-in-prod';
+const JWT_SECRET = process.env.JWT_SECRET || 'fuel360-secret-key-change-in-prod';
 const SALT_ROUNDS = 10;
 
 // --- Configurações de BD ---
-const dbServer = process.env.DB_SERVER_FRETE || process.env.DB_SERVER_ODIN;
-const dbUser = process.env.DB_USER_FRETE || process.env.DB_USER_ODIN;
-const dbPass = process.env.DB_PASSWORD_FRETE || process.env.DB_PASSWORD_ODIN;
-const dbName = process.env.DB_DATABASE_FRETE || process.env.DB_DATABASE_ODIN;
+// Prioriza variáveis FUEL360, mas mantém compatibilidade com antigas (FRETE) se necessário na transição
+const dbServer = process.env.DB_SERVER_FUEL360 || process.env.DB_SERVER_FRETE;
+const dbUser = process.env.DB_USER_FUEL360 || process.env.DB_USER_FRETE;
+const dbPass = process.env.DB_PASSWORD_FUEL360 || process.env.DB_PASSWORD_FRETE;
+const dbName = process.env.DB_DATABASE_FUEL360 || process.env.DB_DATABASE_FRETE || 'Fuel360';
 
 if (!dbServer || !dbUser || !dbPass) {
     console.error("ERRO CRÍTICO: Variáveis de ambiente do Banco de Dados não configuradas.");
 }
 
-const configOdin = {
+const dbConfig = {
   server: dbServer,
   authentication: {
     type: 'default',
@@ -84,7 +85,7 @@ const checkLicense = async (req, res, next) => {
     if (req.method === 'OPTIONS') return next();
 
     try {
-        const { rows } = await executeQuery(configOdin, "SELECT LicenseKey FROM SystemSettings WHERE ID = 1");
+        const { rows } = await executeQuery(dbConfig, "SELECT LicenseKey FROM SystemSettings WHERE ID = 1");
         const licenseKey = rows[0]?.LicenseKey;
 
         if (!licenseKey) {
@@ -136,7 +137,7 @@ app.get('/', (req, res) => res.send('API Fuel360 OK.'));
 
 app.get('/system/status', async (req, res) => {
     try {
-        const { rows } = await executeQuery(configOdin, "SELECT LicenseKey FROM SystemSettings WHERE ID = 1");
+        const { rows } = await executeQuery(dbConfig, "SELECT LicenseKey FROM SystemSettings WHERE ID = 1");
         const key = rows[0]?.LicenseKey;
         if (!key) return res.json({ status: 'MISSING' });
         try {
@@ -158,7 +159,7 @@ app.post('/license', authenticateToken, async (req, res) => {
     const { licenseKey } = req.body;
     try {
         const decoded = jwt.verify(licenseKey, JWT_SECRET);
-        await executeQuery(configOdin, "UPDATE SystemSettings SET LicenseKey = @key WHERE ID = 1", [{ name: 'key', type: TYPES.NVarChar, value: licenseKey }]);
+        await executeQuery(dbConfig, "UPDATE SystemSettings SET LicenseKey = @key WHERE ID = 1", [{ name: 'key', type: TYPES.NVarChar, value: licenseKey }]);
         res.json({ success: true, message: 'Licença ativada!', client: decoded.client, expiresAt: new Date(decoded.exp * 1000) });
     } catch (err) {
         res.status(400).json({ message: 'Chave de licença inválida ou expirada.' });
@@ -167,7 +168,7 @@ app.post('/license', authenticateToken, async (req, res) => {
 
 app.get('/system/config', async (req, res) => {
     try {
-        const { rows } = await executeQuery(configOdin, "SELECT CompanyName, LogoUrl FROM SystemSettings WHERE ID = 1");
+        const { rows } = await executeQuery(dbConfig, "SELECT CompanyName, LogoUrl FROM SystemSettings WHERE ID = 1");
         const config = rows[0] || { CompanyName: 'Fuel360', LogoUrl: '' };
         res.json({ companyName: config.CompanyName, logoUrl: config.LogoUrl });
     } catch (e) { res.status(500).json({ message: e.message }); }
@@ -177,7 +178,7 @@ app.put('/system/config', authenticateToken, async (req, res) => {
     if (req.user.perfil !== 'Admin') return res.status(403).json({ message: 'Acesso negado.' });
     const { companyName, logoUrl } = req.body;
     try {
-        await executeQuery(configOdin, "UPDATE SystemSettings SET CompanyName = @name, LogoUrl = @logo WHERE ID = 1", [
+        await executeQuery(dbConfig, "UPDATE SystemSettings SET CompanyName = @name, LogoUrl = @logo WHERE ID = 1", [
             { name: 'name', type: TYPES.NVarChar, value: companyName },
             { name: 'logo', type: TYPES.NVarChar, value: logoUrl }
         ]);
@@ -188,7 +189,7 @@ app.put('/system/config', authenticateToken, async (req, res) => {
 app.post('/login', async (req, res) => {
     const { usuario, senha } = req.body;
     try {
-        const { rows } = await executeQuery(configOdin, "SELECT * FROM Usuarios WHERE Usuario = @user AND Ativo = 1", [{ name: 'user', type: TYPES.NVarChar, value: usuario }]);
+        const { rows } = await executeQuery(dbConfig, "SELECT * FROM Usuarios WHERE Usuario = @user AND Ativo = 1", [{ name: 'user', type: TYPES.NVarChar, value: usuario }]);
         if (rows.length === 0) return res.status(401).json({ message: 'Usuário ou senha incorretos.' });
         
         const user = rows[0];
@@ -204,7 +205,7 @@ app.post('/login', async (req, res) => {
 app.get('/usuarios', authenticateToken, async (req, res) => {
     if (req.user.perfil !== 'Admin') return res.status(403).json({ message: 'Acesso negado.' });
     try {
-        const { rows } = await executeQuery(configOdin, 'SELECT ID_Usuario, Nome, Usuario, Perfil, Ativo, DataCriacao FROM Usuarios ORDER BY Nome');
+        const { rows } = await executeQuery(dbConfig, 'SELECT ID_Usuario, Nome, Usuario, Perfil, Ativo, DataCriacao FROM Usuarios ORDER BY Nome');
         res.json(rows);
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
@@ -216,7 +217,7 @@ app.post('/usuarios', authenticateToken, async (req, res) => {
         const hashedPassword = await bcrypt.hash(Senha, SALT_ROUNDS);
         const query = `INSERT INTO Usuarios (Nome, Usuario, SenhaHash, Perfil, Ativo) OUTPUT INSERTED.ID_Usuario, INSERTED.Nome, INSERTED.Usuario, INSERTED.Perfil, INSERTED.Ativo VALUES (@nome, @user, @pass, @perfil, 1)`;
         const params = [{ name: 'nome', type: TYPES.NVarChar, value: Nome }, { name: 'user', type: TYPES.NVarChar, value: Usuario }, { name: 'pass', type: TYPES.NVarChar, value: hashedPassword }, { name: 'perfil', type: TYPES.NVarChar, value: Perfil }];
-        const { rows } = await executeQuery(configOdin, query, params);
+        const { rows } = await executeQuery(dbConfig, query, params);
         res.status(201).json(rows[0]);
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
@@ -233,7 +234,7 @@ app.put('/usuarios/:id', authenticateToken, async (req, res) => {
             params.push({ name: 'pass', type: TYPES.NVarChar, value: hashedPassword });
         }
         query += ` OUTPUT INSERTED.ID_Usuario, INSERTED.Nome, INSERTED.Usuario, INSERTED.Perfil, INSERTED.Ativo WHERE ID_Usuario=@id`;
-        const { rows } = await executeQuery(configOdin, query, params);
+        const { rows } = await executeQuery(dbConfig, query, params);
         res.json(rows[0]);
     } catch (error) { res.status(500).json({ message: error.message }); }
 });
@@ -241,7 +242,7 @@ app.put('/usuarios/:id', authenticateToken, async (req, res) => {
 // --- COLABORADORES (COM AUDITORIA) ---
 app.get('/colaboradores', authenticateToken, async (req, res) => {
     try {
-        const { rows } = await executeQuery(configOdin, 'SELECT * FROM Colaboradores ORDER BY Nome');
+        const { rows } = await executeQuery(dbConfig, 'SELECT * FROM Colaboradores ORDER BY Nome');
         res.json(rows);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -257,7 +258,7 @@ app.post('/colaboradores', authenticateToken, async (req, res) => {
             {name:'tipo',type:TYPES.NVarChar,value:c.TipoVeiculo}, {name:'ativo',type:TYPES.Bit,value:c.Ativo},
             {name:'user',type:TYPES.NVarChar,value:user}
         ];
-        const { rows } = await executeQuery(configOdin, q, p);
+        const { rows } = await executeQuery(dbConfig, q, p);
         res.status(201).json(rows[0]);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -278,7 +279,7 @@ app.put('/colaboradores/:id', authenticateToken, async (req, res) => {
             {name:'ativo',type:TYPES.Bit,value:c.Ativo},
             {name:'user',type:TYPES.NVarChar,value:user}, {name:'motivo',type:TYPES.NVarChar,value:motivo}
         ];
-        const { rows } = await executeQuery(configOdin, q, p);
+        const { rows } = await executeQuery(dbConfig, q, p);
         res.json(rows[0]);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -288,12 +289,12 @@ app.delete('/colaboradores/:id', authenticateToken, async (req, res) => {
     try {
         // Logar antes de excluir (tabela LogsSistema deve existir)
         const logQ = `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'EXCLUSAO_COLABORADOR', @detalhes)`;
-        await executeQuery(configOdin, logQ, [
+        await executeQuery(dbConfig, logQ, [
             {name:'user',type:TYPES.NVarChar,value:user},
             {name:'detalhes',type:TYPES.NVarChar,value:`Excluiu colaborador ID ${req.params.id}`}
         ]);
 
-        await executeQuery(configOdin, 'DELETE FROM Colaboradores WHERE ID_Colaborador = @id', [{name:'id',type:TYPES.Int,value:req.params.id}]);
+        await executeQuery(dbConfig, 'DELETE FROM Colaboradores WHERE ID_Colaborador = @id', [{name:'id',type:TYPES.Int,value:req.params.id}]);
         res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -309,7 +310,7 @@ app.get('/ausencias', authenticateToken, async (req, res) => {
             INNER JOIN Colaboradores c ON a.ID_Colaborador = c.ID_Colaborador
             ORDER BY a.DataInicio DESC
         `;
-        const { rows } = await executeQuery(configOdin, q);
+        const { rows } = await executeQuery(dbConfig, q);
         res.json(rows);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -337,12 +338,12 @@ app.post('/ausencias', authenticateToken, async (req, res) => {
             {name:'motivo', type:TYPES.NVarChar, value:Motivo},
             {name:'user', type:TYPES.NVarChar, value:user}
         ];
-        const { rows } = await executeQuery(configOdin, q, p);
+        const { rows } = await executeQuery(dbConfig, q, p);
         
         // Retornar com dados do colaborador para atualizar lista no frontend sem refresh
         const nova = rows[0];
         const qColab = `SELECT Nome as NomeColaborador, ID_Pulsus FROM Colaboradores WHERE ID_Colaborador = @id`;
-        const { rows: rowsC } = await executeQuery(configOdin, qColab, [{name:'id',type:TYPES.Int,value:ID_Colaborador}]);
+        const { rows: rowsC } = await executeQuery(dbConfig, qColab, [{name:'id',type:TYPES.Int,value:ID_Colaborador}]);
         
         res.status(201).json({ ...nova, ...rowsC[0] });
     } catch (e) { res.status(500).json({ message: e.message }); }
@@ -354,7 +355,7 @@ app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
 
     try {
         // Auditoria
-        await executeQuery(configOdin, 
+        await executeQuery(dbConfig, 
             `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'EXCLUSAO_AUSENCIA', @detalhes)`, 
             [
                 {name:'user',type:TYPES.NVarChar,value:user},
@@ -362,7 +363,7 @@ app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
             ]
         );
 
-        await executeQuery(configOdin, 'DELETE FROM ControleAusencias WHERE ID_Ausencia = @id', [{name:'id',type:TYPES.Int,value:req.params.id}]);
+        await executeQuery(dbConfig, 'DELETE FROM ControleAusencias WHERE ID_Ausencia = @id', [{name:'id',type:TYPES.Int,value:req.params.id}]);
         res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -370,7 +371,7 @@ app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
 // --- CONFIGURAÇÃO DE REEMBOLSO (COM AUDITORIA) ---
 app.get('/fuel-config', authenticateToken, async (req, res) => {
     try {
-        const { rows } = await executeQuery(configOdin, 'SELECT * FROM ConfigReembolso WHERE ID = 1');
+        const { rows } = await executeQuery(dbConfig, 'SELECT * FROM ConfigReembolso WHERE ID = 1');
         res.json(rows[0] || { PrecoCombustivel: 5.89, KmL_Carro: 10, KmL_Moto: 35 });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -379,7 +380,7 @@ app.get('/fuel-config', authenticateToken, async (req, res) => {
 app.get('/fuel-config/history', authenticateToken, async (req, res) => {
     try {
         const q = `SELECT TOP 10 * FROM LogsSistema WHERE Acao = 'ALTERACAO_PARAMETROS' ORDER BY DataHora DESC`;
-        const { rows } = await executeQuery(configOdin, q);
+        const { rows } = await executeQuery(dbConfig, q);
         res.json(rows);
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
@@ -400,7 +401,7 @@ app.put('/fuel-config', authenticateToken, async (req, res) => {
             {name:'km',type:TYPES.Decimal,value:c.KmL_Moto,options:{precision:10,scale:2}},
             {name:'user',type:TYPES.NVarChar,value:user}, {name:'motivo',type:TYPES.NVarChar,value:motivo}
         ];
-        await executeQuery(configOdin, qUpdate, pUpdate);
+        await executeQuery(dbConfig, qUpdate, pUpdate);
 
         // 2. Inserir Log de Histórico
         const qLog = `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'ALTERACAO_PARAMETROS', @detalhes)`;
@@ -409,7 +410,7 @@ app.put('/fuel-config', authenticateToken, async (req, res) => {
             {name:'user',type:TYPES.NVarChar,value:user},
             {name:'detalhes',type:TYPES.NVarChar,value:detalhesLog}
         ];
-        await executeQuery(configOdin, qLog, pLog);
+        await executeQuery(dbConfig, qLog, pLog);
 
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: e.message }); }
@@ -422,7 +423,7 @@ app.get('/calculos/check-periodo', authenticateToken, async (req, res) => {
     const { periodo } = req.query;
     try {
         const q = `SELECT COUNT(*) as count FROM HistoricoCalculos WHERE PeriodoReferencia = @p`;
-        const { rows } = await executeQuery(configOdin, q, [{name:'p', type:TYPES.NVarChar, value:periodo}]);
+        const { rows } = await executeQuery(dbConfig, q, [{name:'p', type:TYPES.NVarChar, value:periodo}]);
         res.json({ exists: rows[0].count > 0 });
     } catch (e) {
         res.status(500).json({ message: e.message });
@@ -437,7 +438,7 @@ app.post('/calculos', authenticateToken, async (req, res) => {
         // Se Overwrite for true, remover registros anteriores deste período
         if (Overwrite) {
             // Auditoria do Overwrite
-            await executeQuery(configOdin,
+            await executeQuery(dbConfig,
                 `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'SOBRESCREVER_HISTORICO', @detalhes)`,
                 [
                     {name:'user', type:TYPES.NVarChar, value:user},
@@ -445,7 +446,7 @@ app.post('/calculos', authenticateToken, async (req, res) => {
                 ]
             );
 
-            await executeQuery(configOdin, 
+            await executeQuery(dbConfig, 
                 `DELETE FROM HistoricoCalculos WHERE PeriodoReferencia = @p`,
                 [{name:'p', type:TYPES.NVarChar, value: Periodo}]
             );
@@ -462,7 +463,7 @@ app.post('/calculos', authenticateToken, async (req, res) => {
             {name:'qtd', type:TYPES.Int, value:Itens.length}
         ];
         
-        const { rows: headerRows } = await executeQuery(configOdin, qHeader, pHeader);
+        const { rows: headerRows } = await executeQuery(dbConfig, qHeader, pHeader);
         const idCalculo = headerRows[0].ID_Calculo;
 
         // 2. Salvar Detalhes (Colaborador) e seus registros diários
@@ -482,7 +483,7 @@ app.post('/calculos', authenticateToken, async (req, res) => {
                 {name:'pp', type:TYPES.Decimal, value:item.ParametroPreco, options:{precision:10,scale:2}},
                 {name:'pk', type:TYPES.Decimal, value:item.ParametroKmL, options:{precision:10,scale:2}}
             ];
-            const { rows: detRows } = await executeQuery(configOdin, qDet, pDet);
+            const { rows: detRows } = await executeQuery(dbConfig, qDet, pDet);
             const idDetalhe = detRows[0].ID_Detalhe;
 
             // Insere registros diários se existirem
@@ -497,13 +498,13 @@ app.post('/calculos', authenticateToken, async (req, res) => {
                         {name:'vald', type:TYPES.Decimal, value:reg.Valor, options:{precision:10,scale:2}},
                         {name:'obs', type:TYPES.NVarChar, value:reg.Observacao || null}
                     ];
-                    await executeQuery(configOdin, qDaily, pDaily);
+                    await executeQuery(dbConfig, qDaily, pDaily);
                 }
             }
         }
 
         // Log da ação
-        await executeQuery(configOdin, 
+        await executeQuery(dbConfig, 
             `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'SALVAR_CALCULO', @detalhes)`, 
             [
                 {name:'user', type:TYPES.NVarChar, value:user},
@@ -550,7 +551,7 @@ app.get('/relatorios/reembolso', authenticateToken, async (req, res) => {
 
         query += ` ORDER BY h.DataGeracao DESC, d.NomeColaborador ASC`;
 
-        const { rows } = await executeQuery(configOdin, query, params);
+        const { rows } = await executeQuery(dbConfig, query, params);
         res.json(rows);
 
     } catch (e) {
@@ -592,7 +593,7 @@ app.get('/relatorios/analitico', authenticateToken, async (req, res) => {
         // Ordenar por Colaborador e depois por Data da Ocorrência
         query += ` ORDER BY d.NomeColaborador ASC, dia.DataOcorrencia ASC`;
 
-        const { rows } = await executeQuery(configOdin, query, params);
+        const { rows } = await executeQuery(dbConfig, query, params);
         res.json(rows);
 
     } catch (e) {
@@ -612,7 +613,7 @@ app.post('/logs', authenticateToken, async (req, res) => {
             {name:'acao',type:TYPES.NVarChar,value:acao},
             {name:'detalhes',type:TYPES.NVarChar,value:detalhes}
         ];
-        await executeQuery(configOdin, q, p);
+        await executeQuery(dbConfig, q, p);
         res.status(201).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });

@@ -1,16 +1,16 @@
 
 -- =================================================================================
 -- SCRIPT DE CRIAÇÃO DO BANCO DE DADOS - FUEL360 (REEMBOLSO)
--- VERSÃO 1.4.0 (COM OBSERVAÇÕES NO HISTÓRICO DIÁRIO)
+-- VERSÃO 1.4.5
 -- =================================================================================
 
-IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'Fretes')
+IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'Fuel360')
 BEGIN
-    CREATE DATABASE Fretes;
+    CREATE DATABASE Fuel360;
 END;
 GO
 
-USE Fretes;
+USE Fuel360;
 GO
 
 -- ---------------------------------------------------------------------------------

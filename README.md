@@ -1,128 +1,126 @@
 
-# 🚛 Frete360
-> **Controle total, sem complicação.**
+# ⛽ Fuel360 - Gestão Corporativa de Reembolso
+> **Auditoria, precisão e controle financeiro de quilometragem.**
 
-![Version](https://img.shields.io/badge/version-1.2.21-blue.svg?style=for-the-badge)
-![Stack](https://img.shields.io/badge/stack-React%20%7C%20Node.js%20%7C%20SQL%20Server-sky.svg?style=for-the-badge)
-![Status](https://img.shields.io/badge/status-Private-red.svg?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.4.5-blue.svg?style=for-the-badge)
+![Stack](https://img.shields.io/badge/stack-React%20%7C%20Node.js%20%7C%20SQL%20Server-slate.svg?style=for-the-badge)
+![Status](https://img.shields.io/badge/status-Production-emerald.svg?style=for-the-badge)
 
 ---
 
 ## 🚀 Sobre o Projeto
 
-**Frete360** não é apenas uma planilha glorificada; é um ecossistema completo para gestão logística de fretes rodoviários. 
+**Fuel360** é um sistema especializado na gestão, cálculo e auditoria de reembolso de quilometragem para equipes externas. 
 
-Desenvolvido para resolver a dor de cabeça de transportadoras que lidam com múltiplos veículos, cálculos complexos de impostos (Pedágio, Chapa, Taxas Ambientais) e a necessidade de conciliação com sistemas ERP legados. O sistema transforma dados brutos em inteligência financeira, permitindo saber exatamente o lucro por viagem, por motorista e por rota.
+Diferente de planilhas manuais, o sistema processa arquivos de telemetria/rastreamento (CSV Pulsus), cruza com parâmetros financeiros configuráveis e valida automaticamente regras de absenteísmo (férias, atestados), garantindo que a empresa pague apenas o que foi realmente rodado em dias úteis.
 
-### 🎯 O Problema que Resolvemos
-O caos das planilhas, a perda de comprovantes, o cálculo manual de pedágios e a falta de visibilidade sobre qual veículo está realmente dando lucro.
+### 🎯 Pilares da Solução
+1.  **Conformidade:** Auditoria de todas as alterações cadastrais e financeiras.
+2.  **Automação:** Cálculo massivo de centenas de colaboradores em segundos.
+3.  **Transparência:** Relatórios detalhados (Sintético e Analítico Dia-a-Dia).
 
 ---
 
 ## ✨ Funcionalidades Principais
 
-*   **📊 Dashboard Executivo:** Visão em tempo real de faturamento, custos e lucro líquido (KPIs).
-*   **🚚 Gestão de Frota:** Controle total de veículos, motoristas e capacidades, com suporte a integração ERP.
-*   **💰 Cálculo Automático de Fretes:** Motor de cálculo inteligente que considera cidade base, KM, valor CTE e taxas adicionais configuráveis.
-*   **🔄 Sincronização ERP:** Importação e conciliação automática de Cargas e Veículos de bancos de dados externos (Legado).
-*   **📄 Geração de Recibos:** Emissão de termos de aceite e recibos de pagamento para motoristas prontos para impressão.
-*   **🛡️ Controle de Acesso:** Sistema robusto de autenticação e autorização (Admin vs Operador).
-*   **⚙️ Parametrização Dinâmica:** Tabelas de preços e taxas editáveis pelo usuário administrativo.
+### 💰 Cálculo Automático (Importação)
+*   Importação de arquivos CSV (Padrão Pulsus).
+*   Detecção automática do período de referência.
+*   Cálculo baseado em parâmetros dinâmicos (R$/Litro, KM/L Carro vs Moto).
+*   **Smart Blocking:** Detecção automática de registros conflitantes com Férias/Ausências.
+
+### 👥 Gestão de Equipe
+*   Cadastro completo de colaboradores (Setores, Grupos, Veículos).
+*   Separação por perfil de veículo (Carro/Moto) para cálculo de eficiência diferenciado.
+*   Histórico de auditoria em alterações de cadastro.
+
+### 📅 Gestão de Ausências
+*   Controle de Férias, Atestados e Faltas.
+*   Impacto direto no cálculo financeiro (zera o reembolso dos dias marcados).
+*   Auditoria de inclusão e exclusão de afastamentos.
+
+### 📊 Relatórios Inteligentes
+*   **Visão Sintética:** Resumo financeiro por colaborador no período.
+*   **Visão Analítica:** Detalhamento dia a dia ("Drill-down") com tags de observação para dias não pagos (ex: "Férias").
+*   Histórico imutável de cálculos fechados.
+
+### ⚙️ Parametrização & Segurança
+*   Configuração auditada de preço de combustível e média de consumo.
+*   Controle de Licença de Software.
+*   Logs de sistema para rastreabilidade de ações críticas (Sobrescrita de cálculo, exclusões).
 
 ---
 
-## 🛠️ Tech Stack (A Tecnologia por trás da Máquina)
+## 🛠️ Tech Stack
 
-O projeto foi construído utilizando uma arquitetura moderna, desacoplada e containerizada.
+O projeto utiliza uma arquitetura moderna e escalável, focada em performance e manutenibilidade.
 
-### Frontend (Client-Side)
-*   **Core:** React 18 + TypeScript (Tipagem estática para robustez).
-*   **Estilização:** Tailwind CSS (Design System rápido e responsivo).
-*   **State Management:** Context API (Gestão de estado global leve).
-*   **Build Tool:** ESBuild (Compilação ultra-rápida).
+### Frontend
+*   **Core:** React 18 + TypeScript.
+*   **UI/UX:** Tailwind CSS (Corporate Blue/Slate Theme).
+*   **State:** Context API.
+*   **Build:** ESBuild + Vite (Implicit).
 
-### Backend (Server-Side)
-*   **Runtime:** Node.js.
-*   **Framework:** Express.js.
-*   **Database Driver:** Tedious (Comunicação nativa com SQL Server).
-*   **Auth:** JWT (JSON Web Tokens) + Bcrypt (Hashing de senhas).
-*   **Documentation:** Swagger / OpenAPI 3.0.
-
-### Infra & Dados
-*   **Database:** Microsoft SQL Server.
-*   **Container:** Docker & Docker Compose (Ambiente de desenvolvimento e produção idênticos).
-
----
-
-## 📸 Previews
-
-| Dashboard | Gestão de Cargas |
-|:---:|:---:|
-| *Visão geral de métricas* | *Filtros avançados e status* |
-| ![DashIcon](https://img.icons8.com/fluency/48/null/bullish.png) | ![LoadIcon](https://img.icons8.com/fluency/48/null/box.png) |
-
----
-
-## 🚀 Como Rodar (Quick Start)
-
-Pré-requisitos: **Docker** e **Docker Compose**.
-
-1.  **Clone o repositório**
-    ```bash
-    git clone https://github.com/henriquesergio1/Frete360.git
-    cd Frete360
-    ```
-
-2.  **Configure o Ambiente**
-    Crie um arquivo `.env` na pasta `api/` com as credenciais do banco (veja `api/.env.example`).
-
-3.  **Suba os Containers**
-    ```bash
-    docker-compose up --build
-    ```
-
-4.  **Acesse**
-    *   Frontend: `http://localhost:8080`
-    *   API Docs: `http://localhost:3030/docs`
+### Backend (API)
+*   **Runtime:** Node.js + Express.
+*   **Database:** SQL Server (Driver Nativo `tedious`).
+*   **Auth:** JWT (JSON Web Tokens) com rotação.
+*   **Security:** Hashing de senhas (Bcrypt), Sanitização de Inputs.
 
 ---
 
 ## 📂 Estrutura do Projeto
 
 ```text
-frete360/
+fuel360/
 ├── api/                 # Backend Node.js
-│   ├── index.js         # Entry point e Rotas
-│   ├── swaggerConfig.js # Documentação da API
-│   └── Dockerfile       # Container da API
-├── components/          # Componentes React (UI)
-├── context/             # Lógica de Negócio Global
-├── services/            # Camada de API Client
-├── types.ts             # Definições de Tipos TypeScript
-├── App.tsx              # Layout Principal
-└── docker-compose.yml   # Orquestração
+│   ├── index.js         # API Gateway e Regras de Negócio
+│   └── mockData.ts      # Camada de Simulação (LocalStorage)
+├── components/          # Interface do Usuário (UI)
+│   ├── Importacao.tsx   # Motor de Cálculo
+│   ├── Relatorios.tsx   # BI e Visualização
+│   ├── GestaoAusencias  # Controle de Afastamentos
+│   └── ...
+├── context/             # Estado Global (Auth e Dados)
+├── services/            # Camada de Comunicação HTTP
+└── types.ts             # Tipagem Estática (TypeScript)
 ```
 
 ---
 
-## 👨‍💻 Desenvolvedor
+## 🚀 Como Rodar
 
-<div align="center">
+### Pré-requisitos
+*   Node.js 18+
+*   SQL Server (Para modo Produção) ou Navegador Moderno (Para modo Mock)
 
-**Sérgio Oliveira**
+### Instalação
 
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/henrique-sergio/) 
-[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/henriquesergio1)
+1.  **Clone o repositório**
+    ```bash
+    git clone https://github.com/seu-repo/fuel360.git
+    cd fuel360
+    ```
 
-*Construindo soluções que movem o mundo.*
+2.  **Instale as dependências**
+    ```bash
+    npm install
+    cd api && npm install && cd ..
+    ```
 
-</div>
+3.  **Rodar (Modo Desenvolvimento)**
+    ```bash
+    npm run dev
+    ```
+
+### Modos de Operação
+O sistema possui um switch dinâmico entre **API Real** e **Mock (Simulação)** acessível via Menu Admin.
+*   **Mock:** Roda 100% no navegador usando LocalStorage (Ideal para testes).
+*   **Produção:** Conecta ao SQL Server via API Node.js.
 
 ---
 
 ## 🔒 Licença
 
-Este projeto é software proprietário.
-**Todos os direitos reservados.**
-
-A cópia, modificação, distribuição ou uso não autorizado deste software, no todo ou em parte, é estritamente proibido.
+Este software é proprietário e protegido por leis de direitos autorais.
+**Fuel360 Enterprise © 2025** - Todos os direitos reservados.

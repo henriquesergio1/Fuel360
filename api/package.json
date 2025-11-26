@@ -1,7 +1,7 @@
 {
-  "name": "fretes-api",
-  "version": "1.2.0",
-  "description": "API para o sistema de gestão de fretes.",
+  "name": "fuel360-api",
+  "version": "1.4.5",
+  "description": "API para o sistema de gestão Fuel360.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",

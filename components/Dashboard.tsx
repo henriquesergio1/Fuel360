@@ -1,3 +1,1 @@
-
-import React from 'react';
-export const Dashboard: React.FC = () => <div className="text-slate-500 p-4">Componente descontinuado no Fuel360.</div>;
+// DELETED: Componente descontinuado no Fuel360.

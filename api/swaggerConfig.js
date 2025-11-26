@@ -5,9 +5,9 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Fretes API',
-      version: '1.2.0',
-      description: 'Documentação da API do Sistema de Gestão de Fretes. Esta API gerencia veículos, cargas, parâmetros e lançamentos financeiros.',
+      title: 'Fuel360 API',
+      version: '1.4.5',
+      description: 'API do Sistema de Gestão de Reembolso Fuel360.',
     },
     servers: [
       {
@@ -24,27 +24,16 @@ const options = {
         },
       },
       schemas: {
-        Veiculo: {
+        Colaborador: {
           type: 'object',
           properties: {
-            ID_Veiculo: { type: 'integer' },
-            COD_Veiculo: { type: 'string' },
-            Placa: { type: 'string' },
-            Motorista: { type: 'string' },
+            ID_Colaborador: { type: 'integer' },
+            ID_Pulsus: { type: 'integer' },
+            CodigoSetor: { type: 'integer' },
+            Nome: { type: 'string' },
+            Grupo: { type: 'string' },
             TipoVeiculo: { type: 'string' },
-            CapacidadeKG: { type: 'integer' },
             Ativo: { type: 'boolean' }
-          }
-        },
-        Carga: {
-          type: 'object',
-          properties: {
-            ID_Carga: { type: 'integer' },
-            NumeroCarga: { type: 'string' },
-            Cidade: { type: 'string' },
-            ValorCTE: { type: 'number' },
-            DataCTE: { type: 'string', format: 'date' },
-            COD_Veiculo: { type: 'string' }
           }
         }
       }
@@ -56,10 +45,10 @@ const options = {
     ],
     tags: [
       { name: 'Autenticação', description: 'Gerenciamento de sessão' },
-      { name: 'Veículos', description: 'Gestão da frota' },
-      { name: 'Cargas', description: 'Gestão de cargas manuais e ERP' },
-      { name: 'Lançamentos', description: 'Cálculo e registro de fretes' },
-      { name: 'Parâmetros', description: 'Configuração de valores e taxas' }
+      { name: 'Colaboradores', description: 'Gestão da equipe e setores' },
+      { name: 'Cálculos', description: 'Processamento de reembolso' },
+      { name: 'Relatórios', description: 'Consultas sintéticas e analíticas' },
+      { name: 'Sistema', description: 'Parâmetros e Configurações' }
     ],
     paths: {
       '/login': {
@@ -87,70 +76,21 @@ const options = {
           }
         }
       },
-      '/veiculos': {
+      '/colaboradores': {
         get: {
-          tags: ['Veículos'],
-          summary: 'Lista todos os veículos',
+          tags: ['Colaboradores'],
+          summary: 'Lista todos os colaboradores',
           responses: {
             200: { 
-              description: 'Lista de veículos retornada',
-              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Veiculo' } } } }
+              description: 'Lista de colaboradores',
+              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Colaborador' } } } }
             }
           }
-        },
-        post: {
-          tags: ['Veículos'],
-          summary: 'Cria um novo veículo',
-          requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/Veiculo' } } } },
-          responses: { 201: { description: 'Veículo criado' } }
         }
-      },
-      '/cargas-manuais': {
-        get: {
-          tags: ['Cargas'],
-          summary: 'Lista cargas manuais e importadas',
-          responses: {
-            200: { 
-              description: 'Lista de cargas',
-              content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/Carga' } } } }
-            }
-          }
-        },
-        post: {
-            tags: ['Cargas'],
-            summary: 'Cria uma carga manual',
-            requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/Carga' } } } },
-            responses: { 201: { description: 'Carga criada' } }
-        }
-      },
-      '/lancamentos': {
-        get: {
-            tags: ['Lançamentos'],
-            summary: 'Lista histórico de lançamentos de frete',
-            responses: { 200: { description: 'Sucesso' } }
-        },
-        post: {
-            tags: ['Lançamentos'],
-            summary: 'Registra um novo cálculo de frete',
-            description: 'Salva o lançamento e marca as cargas selecionadas como utilizadas.',
-            responses: { 201: { description: 'Lançamento criado com sucesso' } }
-        }
-      },
-      '/parametros-valores': {
-          get: { tags: ['Parâmetros'], summary: 'Lista valores base por cidade/tipo' }
-      },
-      '/parametros-taxas': {
-          get: { tags: ['Parâmetros'], summary: 'Lista taxas adicionais por cidade' }
-      },
-      '/veiculos-erp/check': {
-          get: { tags: ['Veículos'], summary: 'Verifica divergências com o ERP' }
-      },
-      '/cargas-erp/check': {
-          post: { tags: ['Cargas'], summary: 'Busca cargas no ERP por período' }
       }
     }
   },
-  apis: [], // Não estamos usando anotações nos arquivos js para manter o código limpo, definimos tudo em 'paths' acima
+  apis: [],
 };
 
 module.exports = swaggerJsdoc(options);
