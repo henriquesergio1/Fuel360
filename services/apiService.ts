@@ -1,5 +1,6 @@
 
-import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia } from '../types.ts';
+
+import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia, IntegrationConfig, ImportPreviewResult, DiffItem } from '../types.ts';
 import * as mockApi from '../api/mockData.ts';
 
 declare global { interface Window { __FUEL360_MODO_MOCK__?: boolean; } }
@@ -90,6 +91,12 @@ const RealService = {
     updateColaborador: (id: number, c: Colaborador): Promise<Colaborador> => apiRequest(`/colaboradores/${id}`, 'PUT', c),
     deleteColaborador: (id: number): Promise<void> => apiRequest(`/colaboradores/${id}`, 'DELETE'),
     
+    // Integração Externa (Refatorado)
+    getIntegrationConfig: (): Promise<IntegrationConfig> => apiRequest('/integracao/config', 'GET'),
+    updateIntegrationConfig: (config: IntegrationConfig): Promise<void> => apiRequest('/integracao/config', 'PUT', config),
+    getImportPreview: (): Promise<ImportPreviewResult> => apiRequest('/integracao/preview', 'POST', {}),
+    syncColaboradores: (items: DiffItem[]): Promise<{message: string, count: number}> => apiRequest('/integracao/sync', 'POST', { items }),
+
     getFuelConfig: (): Promise<ConfigReembolso> => apiRequest('/fuel-config', 'GET'),
     updateFuelConfig: (c: ConfigReembolso): Promise<void> => apiRequest('/fuel-config', 'PUT', c),
     getFuelConfigHistory: (): Promise<LogSistema[]> => apiRequest('/fuel-config/history', 'GET'),
@@ -133,6 +140,26 @@ const MockService = {
     updateColaborador: (id: number, c: Colaborador) => mockApi.updateMockColaborador(id, c),
     deleteColaborador: mockApi.deleteMockColaborador,
     
+    // Mock Import
+    getIntegrationConfig: async () => ({ extDb_Host: '127.0.0.1', extDb_Port: 3306, extDb_User: 'root', extDb_Database: 'mock_db', extDb_Query: 'SELECT ...' }),
+    updateIntegrationConfig: async () => {},
+    getImportPreview: async () => {
+        await new Promise(r => setTimeout(r, 1500));
+        return { 
+            novos: [
+                { id_pulsus: 999, nome: 'Novo Colab Mock', changes: [], newData: { id_pulsus: 999, nome: 'Novo Colab Mock', codigo_setor: 505, grupo: 'Vendedor' } }
+            ], 
+            alterados: [
+                { id_pulsus: 550, nome: 'João da Silva', changes: [{ field: 'CodigoSetor', oldValue: 101, newValue: 105 }], newData: { id_pulsus: 550, nome: 'João da Silva', codigo_setor: 105, grupo: 'Vendedor' } }
+            ], 
+            totalExternal: 20 
+        };
+    },
+    syncColaboradores: async () => { 
+        await new Promise(r => setTimeout(r, 1000));
+        return { message: "Sincronização Simulada Concluída", count: 2 };
+    },
+
     getFuelConfig: mockApi.getMockFuelConfig,
     updateFuelConfig: mockApi.updateMockFuelConfig,
     getFuelConfigHistory: async () => [],
@@ -163,6 +190,13 @@ export const getColaboradores = USE_MOCK ? MockService.getColaboradores : RealSe
 export const createColaborador = USE_MOCK ? MockService.createColaborador : RealService.createColaborador;
 export const updateColaborador = USE_MOCK ? MockService.updateColaborador : RealService.updateColaborador;
 export const deleteColaborador = USE_MOCK ? MockService.deleteColaborador : RealService.deleteColaborador;
+
+// Integração
+export const getIntegrationConfig = USE_MOCK ? MockService.getIntegrationConfig : RealService.getIntegrationConfig;
+export const updateIntegrationConfig = USE_MOCK ? MockService.updateIntegrationConfig : RealService.updateIntegrationConfig;
+export const getImportPreview = USE_MOCK ? MockService.getImportPreview : RealService.getImportPreview;
+export const syncColaboradores = USE_MOCK ? MockService.syncColaboradores : RealService.syncColaboradores;
+
 
 export const getFuelConfig = USE_MOCK ? MockService.getFuelConfig : RealService.getFuelConfig;
 export const updateFuelConfig = USE_MOCK ? MockService.updateFuelConfig : RealService.updateFuelConfig;

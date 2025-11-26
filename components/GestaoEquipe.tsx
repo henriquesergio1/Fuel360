@@ -1,8 +1,227 @@
 
+
+
+
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
-import { Colaborador, TipoVeiculoReembolso } from '../types.ts';
-import { PlusCircleIcon, PencilIcon, TrashIcon, UsersIcon, XCircleIcon, CheckCircleIcon, ExclamationIcon, SpinnerIcon, CarIcon, MotoIcon } from './icons.tsx';
+import { Colaborador, TipoVeiculoReembolso, DiffItem } from '../types.ts';
+import { getImportPreview, syncColaboradores } from '../services/apiService.ts';
+import { PlusCircleIcon, PencilIcon, TrashIcon, UsersIcon, XCircleIcon, CheckCircleIcon, ExclamationIcon, SpinnerIcon, CarIcon, MotoIcon, UploadIcon, ChevronRightIcon } from './icons.tsx';
+
+// --- Modal de Auditoria e Sincronização (Novo) ---
+const SyncAuditModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSuccess: () => void;
+}> = ({ isOpen, onClose, onSuccess }) => {
+    const [loading, setLoading] = useState(false);
+    const [syncing, setSyncing] = useState(false);
+    const [error, setError] = useState('');
+    const [previewData, setPreviewData] = useState<{novos: DiffItem[], alterados: DiffItem[], total: number} | null>(null);
+    const [selection, setSelection] = useState<Set<number>>(new Set());
+
+    React.useEffect(() => {
+        if (isOpen) {
+            loadPreview();
+        } else {
+            setPreviewData(null);
+            setError('');
+            setSelection(new Set());
+        }
+    }, [isOpen]);
+
+    const loadPreview = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            const data = await getImportPreview();
+            setPreviewData({ novos: data.novos, alterados: data.alterados, total: data.totalExternal });
+            
+            // Selecionar tudo por padrão
+            const allIds = new Set<number>();
+            data.novos.forEach(i => allIds.add(i.id_pulsus));
+            data.alterados.forEach(i => allIds.add(i.id_pulsus));
+            setSelection(allIds);
+
+        } catch (err: any) {
+            setError(err.message || 'Erro ao conectar no banco externo.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const toggleSelection = (id: number) => {
+        const newSel = new Set(selection);
+        if (newSel.has(id)) newSel.delete(id);
+        else newSel.add(id);
+        setSelection(newSel);
+    };
+
+    const handleSync = async () => {
+        if (!previewData) return;
+        setSyncing(true);
+        try {
+            const itemsToSync = [
+                ...previewData.novos.filter(i => selection.has(i.id_pulsus)),
+                ...previewData.alterados.filter(i => selection.has(i.id_pulsus))
+            ];
+            
+            await syncColaboradores(itemsToSync);
+            onSuccess();
+            onClose();
+        } catch (err: any) {
+            alert('Erro na sincronização: ' + err.message);
+        } finally {
+            setSyncing(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 w-full max-w-4xl max-h-[90vh] flex flex-col">
+                <div className="flex justify-between items-center mb-6 shrink-0">
+                    <div>
+                        <h3 className="text-xl font-bold text-slate-800 flex items-center"><UploadIcon className="w-6 h-6 mr-2 text-blue-600"/> Sincronização de Dados</h3>
+                        <p className="text-sm text-slate-500">Compare os dados externos com o cadastro atual.</p>
+                    </div>
+                    <button onClick={onClose}><XCircleIcon className="w-6 h-6 text-slate-400 hover:text-slate-600"/></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto min-h-[300px] bg-slate-50 rounded-xl border border-slate-200 p-4 relative">
+                    {loading && (
+                        <div className="absolute inset-0 bg-white/80 flex flex-col items-center justify-center z-10">
+                            <SpinnerIcon className="w-10 h-10 text-blue-600 mb-3"/>
+                            <p className="text-slate-600 font-bold">Conectando ao banco externo e comparando...</p>
+                        </div>
+                    )}
+
+                    {error && (
+                        <div className="flex flex-col items-center justify-center h-full text-center">
+                            <ExclamationIcon className="w-12 h-12 text-red-500 mb-2"/>
+                            <p className="text-red-600 font-bold">{error}</p>
+                            <button onClick={loadPreview} className="mt-4 bg-slate-200 hover:bg-slate-300 px-4 py-2 rounded-lg font-bold text-sm">Tentar Novamente</button>
+                        </div>
+                    )}
+
+                    {!loading && !error && previewData && (
+                        <div className="space-y-6">
+                            {previewData.novos.length === 0 && previewData.alterados.length === 0 && (
+                                <div className="text-center py-10">
+                                    <CheckCircleIcon className="w-12 h-12 text-emerald-500 mx-auto mb-3"/>
+                                    <h4 className="text-lg font-bold text-slate-700">Tudo Sincronizado!</h4>
+                                    <p className="text-slate-500">Nenhuma diferença encontrada entre os bancos.</p>
+                                </div>
+                            )}
+
+                            {previewData.novos.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-emerald-600 uppercase tracking-wider mb-2 flex items-center">
+                                        <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mr-2">{previewData.novos.length}</span>
+                                        Novos Colaboradores
+                                    </h4>
+                                    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                                        <table className="w-full text-xs text-left">
+                                            <thead className="bg-emerald-50 text-emerald-700 font-semibold border-b border-emerald-100">
+                                                <tr>
+                                                    <th className="p-3 w-10 text-center">
+                                                        <input type="checkbox" checked={previewData.novos.every(i => selection.has(i.id_pulsus))} onChange={(e) => {
+                                                            const newSel = new Set(selection);
+                                                            previewData.novos.forEach(i => e.target.checked ? newSel.add(i.id_pulsus) : newSel.delete(i.id_pulsus));
+                                                            setSelection(newSel);
+                                                        }}/>
+                                                    </th>
+                                                    <th className="p-3">ID Pulsus</th>
+                                                    <th className="p-3">Nome</th>
+                                                    <th className="p-3">Setor</th>
+                                                    <th className="p-3">Grupo</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {previewData.novos.map(item => (
+                                                    <tr key={item.id_pulsus} className="hover:bg-slate-50">
+                                                        <td className="p-3 text-center"><input type="checkbox" checked={selection.has(item.id_pulsus)} onChange={() => toggleSelection(item.id_pulsus)}/></td>
+                                                        <td className="p-3 font-mono">{item.id_pulsus}</td>
+                                                        <td className="p-3 font-bold text-slate-700">{item.nome}</td>
+                                                        <td className="p-3">{item.newData.codigo_setor}</td>
+                                                        <td className="p-3"><span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">{item.newData.grupo}</span></td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+
+                            {previewData.alterados.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center">
+                                        <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full mr-2">{previewData.alterados.length}</span>
+                                        Alterações de Cadastro (Conflitos)
+                                    </h4>
+                                    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                                        <table className="w-full text-xs text-left">
+                                            <thead className="bg-amber-50 text-amber-700 font-semibold border-b border-amber-100">
+                                                <tr>
+                                                    <th className="p-3 w-10 text-center">
+                                                        <input type="checkbox" checked={previewData.alterados.every(i => selection.has(i.id_pulsus))} onChange={(e) => {
+                                                            const newSel = new Set(selection);
+                                                            previewData.alterados.forEach(i => e.target.checked ? newSel.add(i.id_pulsus) : newSel.delete(i.id_pulsus));
+                                                            setSelection(newSel);
+                                                        }}/>
+                                                    </th>
+                                                    <th className="p-3">Colaborador</th>
+                                                    <th className="p-3">Alterações (De <ChevronRightIcon className="w-3 h-3 inline"/> Para)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {previewData.alterados.map(item => (
+                                                    <tr key={item.id_pulsus} className="hover:bg-amber-50/20">
+                                                        <td className="p-3 text-center align-top pt-4"><input type="checkbox" checked={selection.has(item.id_pulsus)} onChange={() => toggleSelection(item.id_pulsus)}/></td>
+                                                        <td className="p-3 align-top">
+                                                            <div className="font-bold text-slate-800">{item.nome}</div>
+                                                            <div className="text-slate-400 font-mono">ID: {item.id_pulsus}</div>
+                                                        </td>
+                                                        <td className="p-3">
+                                                            {item.changes.map((change, idx) => (
+                                                                <div key={idx} className="flex items-center mb-1 text-slate-600 bg-white p-1 rounded border border-slate-200">
+                                                                    <span className="font-bold w-20 uppercase text-[10px] text-slate-400 mr-2">{change.field}:</span>
+                                                                    <span className="line-through text-red-400 mr-2">{String(change.oldValue)}</span>
+                                                                    <ChevronRightIcon className="w-3 h-3 text-slate-300 mr-2"/>
+                                                                    <span className="font-bold text-emerald-600">{String(change.newValue)}</span>
+                                                                </div>
+                                                            ))}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="mt-6 flex justify-between items-center shrink-0">
+                    <div className="text-sm text-slate-500">
+                        {previewData ? (
+                            <span>{selection.size} itens selecionados de {previewData.novos.length + previewData.alterados.length} encontrados.</span>
+                        ) : <span>Aguardando análise...</span>}
+                    </div>
+                    <div className="flex space-x-3">
+                        <button onClick={onClose} disabled={syncing} className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-50">Cancelar</button>
+                        <button onClick={handleSync} disabled={syncing || selection.size === 0} className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-bold text-sm flex items-center shadow-lg disabled:opacity-50 disabled:shadow-none">
+                            {syncing ? <SpinnerIcon className="w-4 h-4 mr-2"/> : <CheckCircleIcon className="w-4 h-4 mr-2"/>}
+                            Sincronizar Selecionados
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 // --- Modal de Colaborador ---
 const ColaboradorModal: React.FC<{ 
@@ -276,8 +495,9 @@ const GroupModal: React.FC<{
 };
 
 export const GestaoEquipe: React.FC = () => {
-    const { colaboradores, updateColaborador, deleteColaborador } = useContext(DataContext);
+    const { colaboradores, updateColaborador, deleteColaborador, refreshData } = useContext(DataContext);
     const [isColabModalOpen, setIsColabModalOpen] = useState(false);
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
     const [editingColab, setEditingColab] = useState<Colaborador | null>(null);
     const [customGroups, setCustomGroups] = useState<string[]>([]);
     const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
@@ -305,6 +525,9 @@ export const GestaoEquipe: React.FC = () => {
     return (
         <div className="space-y-8">
             <ColaboradorModal isOpen={isColabModalOpen} onClose={() => setIsColabModalOpen(false)} colaborador={editingColab} initialGroup={activeTab} />
+            {/* Modal de Auditoria e Sincronização */}
+            <SyncAuditModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} onSuccess={refreshData} />
+            
             <GroupModal isOpen={isGroupModalOpen} onClose={() => setIsGroupModalOpen(false)} onSave={handleCreateGroup} />
             <DeleteConfirmationModal isOpen={!!colabToDelete} onClose={() => setColabToDelete(null)} onConfirm={confirmDelete} colabName={colabToDelete?.Nome || ''} />
 
@@ -313,9 +536,14 @@ export const GestaoEquipe: React.FC = () => {
                     <h2 className="text-3xl font-extrabold text-slate-800 mb-2 tracking-tight">Gestão de Equipe</h2>
                     <p className="text-slate-500 font-medium">Organização de colaboradores por grupos e setores.</p>
                 </div>
-                <button onClick={handleNewColab} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl flex items-center shadow-lg shadow-blue-600/20 transition-all hover:-translate-y-0.5">
-                    <PlusCircleIcon className="w-5 h-5 mr-2" /> Novo {activeTab}
-                </button>
+                <div className="flex space-x-2">
+                    <button onClick={() => setIsImportModalOpen(true)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 px-4 rounded-xl flex items-center shadow-sm transition-all hover:-translate-y-0.5">
+                        <UploadIcon className="w-5 h-5 mr-2" /> Importar DB
+                    </button>
+                    <button onClick={handleNewColab} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl flex items-center shadow-lg shadow-blue-600/20 transition-all hover:-translate-y-0.5">
+                        <PlusCircleIcon className="w-5 h-5 mr-2" /> Novo {activeTab}
+                    </button>
+                </div>
             </div>
 
             {/* Modern Tabs - Corporate Light Theme */}

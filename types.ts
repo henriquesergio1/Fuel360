@@ -48,6 +48,38 @@ export interface Colaborador {
     MotivoAlteracao?: string;
 }
 
+// Novo v1.4.6: Importação Externa Refatorada
+export interface IntegrationConfig {
+    extDb_Host: string;
+    extDb_Port: number;
+    extDb_User: string;
+    extDb_Pass?: string; // Opcional no retorno do get
+    extDb_Database: string;
+    extDb_Query: string;
+}
+
+export interface DiffItem {
+    id_pulsus: number;
+    nome: string;
+    changes: {
+        field: string;
+        oldValue: any;
+        newValue: any;
+    }[];
+    newData: {
+        id_pulsus: number;
+        nome: string;
+        codigo_setor: number;
+        grupo: string;
+    }
+}
+
+export interface ImportPreviewResult {
+    novos: DiffItem[];
+    alterados: DiffItem[];
+    totalExternal: number;
+}
+
 // Novo v1.3.7: Gestão de Ausências
 export interface Ausencia {
     ID_Ausencia: number;

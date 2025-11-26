@@ -1,4 +1,6 @@
 
+
+
 // Carrega as variáveis de ambiente
 require('dotenv').config();
 
@@ -7,6 +9,7 @@ const cors = require('cors');
 const { Connection, Request, TYPES } = require('tedious');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const mariadb = require('mariadb'); // Novo driver
 
 // --- Swagger Documentation ---
 const swaggerUi = require('swagger-ui-express');
@@ -16,8 +19,7 @@ const swaggerSpec = require('./swaggerConfig');
 const JWT_SECRET = process.env.JWT_SECRET || 'fuel360-secret-key-change-in-prod';
 const SALT_ROUNDS = 10;
 
-// --- Configurações de BD ---
-// Prioriza variáveis FUEL360, mas mantém compatibilidade com antigas (FRETE) se necessário na transição
+// --- Configurações de BD SQL Server ---
 const dbServer = process.env.DB_SERVER_FUEL360 || process.env.DB_SERVER_FRETE;
 const dbUser = process.env.DB_USER_FUEL360 || process.env.DB_USER_FRETE;
 const dbPass = process.env.DB_PASSWORD_FUEL360 || process.env.DB_PASSWORD_FRETE;
@@ -61,7 +63,6 @@ function executeQuery(config, query, params = []) {
 // --- ROTINA DE SEED (USUÁRIO PADRÃO) ---
 async function seedDefaultUser() {
     try {
-        // Verifica se tabela existe primeiro para não quebrar em banco vazio sem tabelas
         const checkTable = "SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'Usuarios'";
         const { rows: tableRows } = await executeQuery(dbConfig, checkTable);
         
@@ -88,7 +89,6 @@ async function seedDefaultUser() {
 
 const app = express();
 
-// CORS Explícito
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -98,7 +98,6 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- ROTA DE DOCUMENTAÇÃO SWAGGER ---
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 const port = process.env.API_PORT || 3000;
@@ -116,9 +115,7 @@ const checkLicense = async (req, res, next) => {
         const { rows } = await executeQuery(dbConfig, "SELECT LicenseKey FROM SystemSettings WHERE ID = 1");
         const licenseKey = rows[0]?.LicenseKey;
 
-        if (!licenseKey) {
-            return res.status(402).json({ message: 'Licença não encontrada. Por favor, registre o sistema no menu Admin.', code: 'LICENSE_MISSING' });
-        }
+        if (!licenseKey) return res.status(402).json({ message: 'Licença não encontrada.', code: 'LICENSE_MISSING' });
 
         try {
             const decoded = jwt.verify(licenseKey, JWT_SECRET);
@@ -130,24 +127,19 @@ const checkLicense = async (req, res, next) => {
                     res.set('X-License-Status', 'EXPIRED');
                     return next();
                 } else {
-                    return res.status(402).json({ 
-                        message: 'Sua licença expirou. O sistema está em MODO LEITURA.', 
-                        code: 'LICENSE_EXPIRED' 
-                    });
+                    return res.status(402).json({ message: 'Sua licença expirou.', code: 'LICENSE_EXPIRED' });
                 }
             } else {
-                return res.status(402).json({ message: 'Licença inválida ou corrompida.', code: 'LICENSE_INVALID' });
+                return res.status(402).json({ message: 'Licença inválida.', code: 'LICENSE_INVALID' });
             }
         }
     } catch (error) {
-        console.error('Erro ao verificar licença:', error);
         return res.status(500).json({ message: 'Erro interno ao verificar licença.' });
     }
 };
 
 app.use(checkLicense);
 
-// --- MIDDLEWARE AUTH ---
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -277,7 +269,7 @@ app.get('/colaboradores', authenticateToken, async (req, res) => {
 
 app.post('/colaboradores', authenticateToken, async (req, res) => {
     const c = req.body;
-    const user = req.user.usuario; // Auditoria: Quem criou
+    const user = req.user.usuario; 
     try {
         const q = `INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao) OUTPUT INSERTED.* VALUES (@idp, @cod, @nome, @grp, @tipo, @ativo, @user)`;
         const p = [
@@ -293,8 +285,8 @@ app.post('/colaboradores', authenticateToken, async (req, res) => {
 
 app.put('/colaboradores/:id', authenticateToken, async (req, res) => {
     const c = req.body;
-    const user = req.user.usuario; // Auditoria: Quem alterou
-    const motivo = c.MotivoAlteracao || 'Alteração de cadastro'; // Auditoria: Motivo
+    const user = req.user.usuario;
+    const motivo = c.MotivoAlteracao || 'Alteração de cadastro'; 
 
     try {
         const q = `UPDATE Colaboradores SET ID_Pulsus=@idp, CodigoSetor=@cod, Nome=@nome, Grupo=@grp, TipoVeiculo=@tipo, Ativo=@ativo, 
@@ -315,22 +307,189 @@ app.put('/colaboradores/:id', authenticateToken, async (req, res) => {
 app.delete('/colaboradores/:id', authenticateToken, async (req, res) => {
     const user = req.user.usuario;
     try {
-        // Logar antes de excluir (tabela LogsSistema deve existir)
         const logQ = `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'EXCLUSAO_COLABORADOR', @detalhes)`;
         await executeQuery(dbConfig, logQ, [
             {name:'user',type:TYPES.NVarChar,value:user},
             {name:'detalhes',type:TYPES.NVarChar,value:`Excluiu colaborador ID ${req.params.id}`}
         ]);
-
         await executeQuery(dbConfig, 'DELETE FROM Colaboradores WHERE ID_Colaborador = @id', [{name:'id',type:TYPES.Int,value:req.params.id}]);
         res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
+// --- INTEGRAÇÃO DB EXTERNO (Refatorado v1.4.6) ---
+
+// 1. GET Config
+app.get('/integracao/config', authenticateToken, async (req, res) => {
+    if (req.user.perfil !== 'Admin') return res.status(403).json({ message: 'Acesso negado.' });
+    try {
+        const { rows } = await executeQuery(dbConfig, 'SELECT ExtDb_Host, ExtDb_Port, ExtDb_User, ExtDb_Database, ExtDb_Query FROM SystemSettings WHERE ID = 1');
+        // Não retornar senha
+        res.json(rows[0] || {});
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// 2. SAVE Config
+app.put('/integracao/config', authenticateToken, async (req, res) => {
+    if (req.user.perfil !== 'Admin') return res.status(403).json({ message: 'Acesso negado.' });
+    const { extDb_Host, extDb_Port, extDb_User, extDb_Pass, extDb_Database, extDb_Query } = req.body;
+    
+    try {
+        let q = `UPDATE SystemSettings SET ExtDb_Host=@h, ExtDb_Port=@p, ExtDb_User=@u, ExtDb_Database=@d, ExtDb_Query=@q`;
+        const params = [
+            {name:'h', type:TYPES.NVarChar, value:extDb_Host},
+            {name:'p', type:TYPES.Int, value:extDb_Port},
+            {name:'u', type:TYPES.NVarChar, value:extDb_User},
+            {name:'d', type:TYPES.NVarChar, value:extDb_Database},
+            {name:'q', type:TYPES.NVarChar, value:extDb_Query}
+        ];
+        
+        if (extDb_Pass && extDb_Pass.trim() !== '') {
+            q += `, ExtDb_Pass=@pass`;
+            params.push({name:'pass', type:TYPES.NVarChar, value:extDb_Pass});
+        }
+        
+        q += ` WHERE ID = 1`;
+        
+        await executeQuery(dbConfig, q, params);
+        res.json({ success: true, message: 'Configuração de integração salva.' });
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// 3. PREVIEW Import (Diff)
+app.post('/integracao/preview', authenticateToken, async (req, res) => {
+    let mariaConn;
+    try {
+        // 1. Carregar Config
+        const { rows: configRows } = await executeQuery(dbConfig, 'SELECT * FROM SystemSettings WHERE ID = 1');
+        const config = configRows[0];
+        
+        if (!config || !config.ExtDb_Host) {
+            return res.status(400).json({ message: 'Integração não configurada. Acesse o menu Admin.' });
+        }
+
+        // 2. Conectar DB Externo
+        mariaConn = await mariadb.createConnection({
+            host: config.ExtDb_Host,
+            port: config.ExtDb_Port || 3306,
+            user: config.ExtDb_User,
+            password: config.ExtDb_Pass,
+            database: config.ExtDb_Database
+        });
+
+        // 3. Executar Query Externa
+        const externalRows = await mariaConn.query(config.ExtDb_Query);
+        if (!externalRows || !Array.isArray(externalRows)) throw new Error("A query não retornou dados.");
+
+        // 4. Carregar Dados Internos
+        const { rows: internalRows } = await executeQuery(dbConfig, 'SELECT * FROM Colaboradores');
+        
+        // 5. Comparar (Diff Logic)
+        const novos = [];
+        const alterados = [];
+        
+        for (const ext of externalRows) {
+            // Case insensitive keys from external
+            const id_pulsus = Number(ext.id_pulsus || ext.ID_PULSUS);
+            const nome = (ext.nome || ext.NOME || '').trim();
+            const codigo_setor = Number(ext.codigo_setor || ext.CODIGO_SETOR || 0);
+            const grupo = (ext.grupo || ext.GRUPO || 'Geral').trim();
+
+            if (!id_pulsus || !nome) continue;
+
+            const interno = internalRows.find(i => i.ID_Pulsus === id_pulsus);
+
+            const newData = { id_pulsus, nome, codigo_setor, grupo };
+
+            if (!interno) {
+                // Novo registro
+                novos.push({ id_pulsus, nome, changes: [], newData });
+            } else {
+                // Checar diferenças
+                const changes = [];
+                if (interno.Nome.trim() !== nome) changes.push({ field: 'Nome', oldValue: interno.Nome, newValue: nome });
+                if (interno.CodigoSetor !== codigo_setor) changes.push({ field: 'CodigoSetor', oldValue: interno.CodigoSetor, newValue: codigo_setor });
+                if (interno.Grupo.trim() !== grupo) changes.push({ field: 'Grupo', oldValue: interno.Grupo, newValue: grupo });
+
+                if (changes.length > 0) {
+                    alterados.push({ id_pulsus, nome, changes, newData });
+                }
+            }
+        }
+
+        res.json({
+            novos,
+            alterados,
+            totalExternal: externalRows.length
+        });
+
+    } catch (err) {
+        console.error("Erro no preview de importação:", err);
+        res.status(500).json({ message: `Erro ao conectar/processar: ${err.message}` });
+    } finally {
+        if (mariaConn) mariaConn.end();
+    }
+});
+
+// 4. SYNC (Apply Changes)
+app.post('/integracao/sync', authenticateToken, async (req, res) => {
+    const { items } = req.body; // Array de DiffItems
+    const adminUser = req.user.usuario;
+
+    if (!items || !Array.isArray(items)) return res.status(400).json({ message: 'Dados inválidos.' });
+
+    let processedCount = 0;
+    try {
+        for (const item of items) {
+            const { id_pulsus, nome, codigo_setor, grupo } = item.newData;
+            
+            // Check Existencia
+            const checkQ = `SELECT ID_Colaborador FROM Colaboradores WHERE ID_Pulsus = @idp`;
+            const { rows: existing } = await executeQuery(dbConfig, checkQ, [{ name: 'idp', type: TYPES.Int, value: id_pulsus }]);
+
+            if (existing.length > 0) {
+                // Update
+                const updateQ = `UPDATE Colaboradores SET CodigoSetor=@cod, Nome=@nome, Grupo=@grp, DataAlteracao=GETDATE(), MotivoAlteracao='Sincronização DB', UsuarioAlteracao=@user WHERE ID_Pulsus=@idp`;
+                await executeQuery(dbConfig, updateQ, [
+                    { name: 'cod', type: TYPES.Int, value: codigo_setor },
+                    { name: 'nome', type: TYPES.NVarChar, value: nome },
+                    { name: 'grp', type: TYPES.NVarChar, value: grupo },
+                    { name: 'idp', type: TYPES.Int, value: id_pulsus },
+                    { name: 'user', type: TYPES.NVarChar, value: adminUser }
+                ]);
+            } else {
+                // Insert
+                const insertQ = `INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao) VALUES (@idp, @cod, @nome, @grp, 'Carro', 1, @user)`;
+                await executeQuery(dbConfig, insertQ, [
+                    { name: 'idp', type: TYPES.Int, value: id_pulsus },
+                    { name: 'cod', type: TYPES.Int, value: codigo_setor },
+                    { name: 'nome', type: TYPES.NVarChar, value: nome },
+                    { name: 'grp', type: TYPES.NVarChar, value: grupo },
+                    { name: 'user', type: TYPES.NVarChar, value: adminUser }
+                ]);
+            }
+            processedCount++;
+        }
+        
+        // Log Batch
+        await executeQuery(dbConfig, 
+            `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'SINCRONIZACAO_DB', @detalhes)`, 
+            [
+                {name:'user', type:TYPES.NVarChar, value:adminUser},
+                {name:'detalhes', type:TYPES.NVarChar, value:`Sincronizou ${processedCount} colaboradores do banco externo.`}
+            ]
+        );
+
+        res.json({ message: 'Sincronização realizada com sucesso.', count: processedCount });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: `Erro ao salvar dados: ${e.message}` });
+    }
+});
+
 // --- GESTÃO DE AUSÊNCIAS (NOVO v1.3.7 / Update 1.4.1) ---
 app.get('/ausencias', authenticateToken, async (req, res) => {
     try {
-        // Join para trazer o nome e o ID pulsus do colaborador
         const q = `
             SELECT a.ID_Ausencia, a.ID_Colaborador, a.DataInicio, a.DataFim, a.Motivo,
                    c.Nome as NomeColaborador, c.ID_Pulsus
@@ -347,8 +506,6 @@ app.post('/ausencias', authenticateToken, async (req, res) => {
     const { ID_Colaborador, DataInicio, DataFim, Motivo } = req.body;
     const user = req.user.usuario;
 
-    // Correção de Fuso: Forçar hora para 12:00 para evitar que o Date() do SQL Server
-    // ou do driver trunque para o dia anterior devido a conversões de timezone negativo (ex: GMT-3)
     const fixDate = (dtStr) => {
         const d = new Date(dtStr);
         d.setUTCHours(12, 0, 0, 0);
@@ -368,7 +525,6 @@ app.post('/ausencias', authenticateToken, async (req, res) => {
         ];
         const { rows } = await executeQuery(dbConfig, q, p);
         
-        // Retornar com dados do colaborador para atualizar lista no frontend sem refresh
         const nova = rows[0];
         const qColab = `SELECT Nome as NomeColaborador, ID_Pulsus FROM Colaboradores WHERE ID_Colaborador = @id`;
         const { rows: rowsC } = await executeQuery(dbConfig, qColab, [{name:'id',type:TYPES.Int,value:ID_Colaborador}]);
@@ -378,11 +534,10 @@ app.post('/ausencias', authenticateToken, async (req, res) => {
 });
 
 app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
-    const { motivo } = req.body; // Motivo da exclusão para auditoria
+    const { motivo } = req.body; 
     const user = req.user.usuario;
 
     try {
-        // Auditoria
         await executeQuery(dbConfig, 
             `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'EXCLUSAO_AUSENCIA', @detalhes)`, 
             [
@@ -390,13 +545,12 @@ app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
                 {name:'detalhes',type:TYPES.NVarChar,value:`Excluiu Ausência ID ${req.params.id}. Motivo: ${motivo || 'Não informado'}`}
             ]
         );
-
         await executeQuery(dbConfig, 'DELETE FROM ControleAusencias WHERE ID_Ausencia = @id', [{name:'id',type:TYPES.Int,value:req.params.id}]);
         res.status(204).send();
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-// --- CONFIGURAÇÃO DE REEMBOLSO (COM AUDITORIA) ---
+// --- CONFIGURAÇÃO DE REEMBOLSO ---
 app.get('/fuel-config', authenticateToken, async (req, res) => {
     try {
         const { rows } = await executeQuery(dbConfig, 'SELECT * FROM ConfigReembolso WHERE ID = 1');
@@ -404,7 +558,6 @@ app.get('/fuel-config', authenticateToken, async (req, res) => {
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-// Rota para obter o histórico de alterações de parâmetros
 app.get('/fuel-config/history', authenticateToken, async (req, res) => {
     try {
         const q = `SELECT TOP 10 * FROM LogsSistema WHERE Acao = 'ALTERACAO_PARAMETROS' ORDER BY DataHora DESC`;
@@ -419,7 +572,6 @@ app.put('/fuel-config', authenticateToken, async (req, res) => {
     const motivo = c.MotivoAlteracao || 'Ajuste de parâmetros';
 
     try {
-        // 1. Atualizar Configuração
         const qUpdate = `UPDATE ConfigReembolso SET PrecoCombustivel=@p, KmL_Carro=@kc, KmL_Moto=@km, 
                    DataAlteracao=GETDATE(), UsuarioAlteracao=@user, MotivoAlteracao=@motivo 
                    WHERE ID = 1`;
@@ -431,7 +583,6 @@ app.put('/fuel-config', authenticateToken, async (req, res) => {
         ];
         await executeQuery(dbConfig, qUpdate, pUpdate);
 
-        // 2. Inserir Log de Histórico
         const qLog = `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'ALTERACAO_PARAMETROS', @detalhes)`;
         const detalhesLog = `Combustível: R$${c.PrecoCombustivel}, Carro: ${c.KmL_Carro}km/l, Moto: ${c.KmL_Moto}km/l. Motivo: ${motivo}`;
         const pLog = [
@@ -439,23 +590,18 @@ app.put('/fuel-config', authenticateToken, async (req, res) => {
             {name:'detalhes',type:TYPES.NVarChar,value:detalhesLog}
         ];
         await executeQuery(dbConfig, qLog, pLog);
-
         res.json({ success: true });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-// --- SALVAR CÁLCULO E RELATÓRIOS (NOVO) ---
-
-// Nova rota para verificar se o cálculo já existe
+// --- SALVAR CÁLCULO E RELATÓRIOS ---
 app.get('/calculos/check-periodo', authenticateToken, async (req, res) => {
     const { periodo } = req.query;
     try {
         const q = `SELECT COUNT(*) as count FROM HistoricoCalculos WHERE PeriodoReferencia = @p`;
         const { rows } = await executeQuery(dbConfig, q, [{name:'p', type:TYPES.NVarChar, value:periodo}]);
         res.json({ exists: rows[0].count > 0 });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
+    } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
 app.post('/calculos', authenticateToken, async (req, res) => {
@@ -463,9 +609,7 @@ app.post('/calculos', authenticateToken, async (req, res) => {
     const user = req.user.usuario;
 
     try {
-        // Se Overwrite for true, remover registros anteriores deste período
         if (Overwrite) {
-            // Auditoria do Overwrite
             await executeQuery(dbConfig,
                 `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'SOBRESCREVER_HISTORICO', @detalhes)`,
                 [
@@ -473,14 +617,12 @@ app.post('/calculos', authenticateToken, async (req, res) => {
                     {name:'detalhes', type:TYPES.NVarChar, value:`Sobrescreveu período: ${Periodo}. Motivo: ${MotivoOverwrite || 'Não informado'}`}
                 ]
             );
-
             await executeQuery(dbConfig, 
                 `DELETE FROM HistoricoCalculos WHERE PeriodoReferencia = @p`,
                 [{name:'p', type:TYPES.NVarChar, value: Periodo}]
             );
         }
 
-        // 1. Salvar Cabeçalho
         const qHeader = `INSERT INTO HistoricoCalculos (PeriodoReferencia, UsuarioGerador, TotalGeral, QtdColaboradores) 
                          OUTPUT INSERTED.ID_Calculo 
                          VALUES (@periodo, @user, @total, @qtd)`;
@@ -494,9 +636,7 @@ app.post('/calculos', authenticateToken, async (req, res) => {
         const { rows: headerRows } = await executeQuery(dbConfig, qHeader, pHeader);
         const idCalculo = headerRows[0].ID_Calculo;
 
-        // 2. Salvar Detalhes (Colaborador) e seus registros diários
         for (const item of Itens) {
-            // Insere o detalhe do colaborador
             const qDet = `INSERT INTO HistoricoDetalhes (ID_Calculo, ID_Pulsus, NomeColaborador, Grupo, TipoVeiculo, TotalKM, ValorReembolso, ParametroPreco, ParametroKmL)
                           OUTPUT INSERTED.ID_Detalhe
                           VALUES (@idc, @idp, @nome, @grp, @tipo, @km, @val, @pp, @pk)`;
@@ -514,7 +654,6 @@ app.post('/calculos', authenticateToken, async (req, res) => {
             const { rows: detRows } = await executeQuery(dbConfig, qDet, pDet);
             const idDetalhe = detRows[0].ID_Detalhe;
 
-            // Insere registros diários se existirem
             if (item.RegistrosDiarios && Array.isArray(item.RegistrosDiarios)) {
                 for (const reg of item.RegistrosDiarios) {
                     const qDaily = `INSERT INTO HistoricoDiario (ID_Detalhe, DataOcorrencia, KM_Dia, Valor_Dia, Observacao)
@@ -531,7 +670,6 @@ app.post('/calculos', authenticateToken, async (req, res) => {
             }
         }
 
-        // Log da ação
         await executeQuery(dbConfig, 
             `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'SALVAR_CALCULO', @detalhes)`, 
             [
@@ -548,7 +686,6 @@ app.post('/calculos', authenticateToken, async (req, res) => {
     }
 });
 
-// Relatório Sintético
 app.get('/relatorios/reembolso', authenticateToken, async (req, res) => {
     const { startDate, endDate, colaboradorId } = req.query;
 
@@ -576,22 +713,14 @@ app.get('/relatorios/reembolso', authenticateToken, async (req, res) => {
              query += ` AND d.ID_Pulsus = @colabId`;
              params.push({name:'colabId', type:TYPES.Int, value: parseInt(colaboradorId)});
         }
-
         query += ` ORDER BY h.DataGeracao DESC, d.NomeColaborador ASC`;
-
         const { rows } = await executeQuery(dbConfig, query, params);
         res.json(rows);
-
-    } catch (e) {
-        console.error("Erro ao gerar relatório:", e);
-        res.status(500).json({ message: "Erro ao buscar dados do relatório." });
-    }
+    } catch (e) { res.status(500).json({ message: "Erro ao buscar dados do relatório." }); }
 });
 
-// Relatório Analítico (Dia a Dia)
 app.get('/relatorios/analitico', authenticateToken, async (req, res) => {
     const { startDate, endDate, colaboradorId } = req.query;
-
     try {
         let query = `
             SELECT 
@@ -617,20 +746,12 @@ app.get('/relatorios/analitico', authenticateToken, async (req, res) => {
              query += ` AND d.ID_Pulsus = @colabId`;
              params.push({name:'colabId', type:TYPES.Int, value: parseInt(colaboradorId)});
         }
-
-        // Ordenar por Colaborador e depois por Data da Ocorrência
         query += ` ORDER BY d.NomeColaborador ASC, dia.DataOcorrencia ASC`;
-
         const { rows } = await executeQuery(dbConfig, query, params);
         res.json(rows);
-
-    } catch (e) {
-        console.error("Erro ao gerar relatório analítico:", e);
-        res.status(500).json({ message: "Erro ao buscar dados analíticos." });
-    }
+    } catch (e) { res.status(500).json({ message: "Erro ao buscar dados analíticos." }); }
 });
 
-// --- LOGS DE SISTEMA ---
 app.post('/logs', authenticateToken, async (req, res) => {
     const { acao, detalhes } = req.body;
     const user = req.user.usuario;
@@ -648,6 +769,5 @@ app.post('/logs', authenticateToken, async (req, res) => {
 
 app.listen(port, () => {
     console.log(`API Fuel360 rodando na porta ${port}`);
-    // Tenta seedar o usuário padrão ao iniciar
     seedDefaultUser();
 });
