@@ -12,6 +12,7 @@
 
 
 
+
 import React, { useState, useContext } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { UploadIcon, DropIcon, CarIcon, MotoIcon, PrinterIcon, ExclamationIcon, CheckCircleIcon, SpinnerIcon, DocumentReportIcon, CalculatorIcon } from './icons.tsx';
@@ -160,7 +161,8 @@ export const Importacao: React.FC = () => {
     // Listas de bloqueios/ignorar
     const [ignoredList, setIgnoredList] = useState<{id: number, nome: string}[]>([]);
     const [blockedList, setBlockedList] = useState<{id: number, nome: string, data: string, motivo: string}[]>([]);
-    
+    const [pendingGroupList, setPendingGroupList] = useState<{id: number, nome: string}[]>([]);
+
     const [isProcessing, setIsProcessing] = useState(false);
     const [showReport, setShowReport] = useState(false);
     const [periodo, setPeriodo] = useState('');
@@ -180,7 +182,8 @@ export const Importacao: React.FC = () => {
         setCalculos([]);
         setIgnoredList([]);
         setBlockedList([]);
-        setSavedSuccess(false); // Reset saved status on new file
+        setPendingGroupList([]); // Reset
+        setSavedSuccess(false); 
         
         Papa.parse(file, {
             header: true,
@@ -343,6 +346,7 @@ export const Importacao: React.FC = () => {
 
         const resultadoFinal: CalculoReembolso[] = [];
         const ignorados: {id: number, nome: string}[] = [];
+        const pendentes: {id: number, nome: string}[] = [];
 
         agrupado.forEach((registros, id) => {
             let colaborador = colaboradores.find(c => c.ID_Pulsus === id);
@@ -350,6 +354,12 @@ export const Importacao: React.FC = () => {
             if (!colaborador) {
                 ignorados.push({ id, nome: registros[0].Nome });
                 return; 
+            }
+
+            // REGRA DE BLOQUEIO DO GRUPO "OUTROS"
+            if (colaborador.Grupo === 'Outros') {
+                pendentes.push({ id, nome: colaborador.Nome });
+                return;
             }
 
             const totalKM = registros.reduce((sum, r) => sum + r.KM, 0);
@@ -375,6 +385,7 @@ export const Importacao: React.FC = () => {
 
         setIgnoredList(ignorados);
         setBlockedList(registrosBloqueados);
+        setPendingGroupList(pendentes);
         setCalculos(resultadoFinal);
     };
 
@@ -502,6 +513,28 @@ export const Importacao: React.FC = () => {
                                         <span>{bg.data} - {bg.nome}</span>
                                         <span className="font-bold uppercase text-[10px] bg-blue-100 px-1 rounded">{bg.motivo}</span>
                                     </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AVISO DE GRUPO OUTROS (PENDENTES) */}
+            {pendingGroupList.length > 0 && (
+                <div className="bg-purple-50 border border-purple-100 rounded-xl p-5 shadow-sm animate-fade-in-up">
+                    <div className="flex items-start">
+                        <ExclamationIcon className="w-6 h-6 text-purple-500 mr-3 shrink-0 mt-1"/>
+                        <div className="flex-1">
+                            <h3 className="text-purple-800 font-bold text-lg">Atenção: {pendingGroupList.length} Colaboradores Pendentes (Grupo 'Outros')</h3>
+                            <p className="text-purple-700/80 text-sm mb-3">
+                                Estes colaboradores foram importados recentemente e estão no grupo <strong>Outros</strong>. 
+                                Eles foram <strong className="underline decoration-purple-400">ignorados no cálculo</strong>. 
+                                Acesse o menu "Equipe" e mova-os para um grupo válido (Vendedor, Promotor, etc) para incluir no próximo cálculo.
+                            </p>
+                            <div className="max-h-32 overflow-y-auto text-xs font-mono text-purple-800 bg-white p-3 rounded-lg border border-purple-200 scrollbar-thin scrollbar-thumb-purple-200">
+                                {pendingGroupList.map((pg, idx) => (
+                                    <div key={`pg-${idx}`} className="py-0.5 border-b border-purple-50 last:border-0">ID: {pg.id} - {pg.nome}</div>
                                 ))}
                             </div>
                         </div>

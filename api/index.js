@@ -393,12 +393,14 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
             const id_pulsus = Number(ext.id_pulsus || ext.ID_PULSUS);
             const nome = (ext.nome || ext.NOME || '').trim();
             const codigo_setor = Number(ext.codigo_setor || ext.CODIGO_SETOR || 0);
-            const grupo = (ext.grupo || ext.GRUPO || 'Geral').trim();
+            
+            // Regra: Se grupo externo vazio, assume "Outros"
+            let grupoRaw = (ext.grupo || ext.GRUPO || '').trim();
+            const grupo = grupoRaw === '' ? 'Outros' : grupoRaw;
 
             if (!id_pulsus || !nome) continue;
 
             const interno = internalRows.find(i => i.ID_Pulsus === id_pulsus);
-
             const newData = { id_pulsus, nome, codigo_setor, grupo };
 
             if (!interno) {
@@ -406,12 +408,18 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
                 novos.push({ id_pulsus, nome, changes: [], newData });
             } else {
                 // Checar diferenças
+                // REGRA DE PRESERVAÇÃO: Não verificamos grupo em usuários existentes. 
+                // Apenas Nome e Setor são atualizados pelo DB externo.
                 const changes = [];
                 if (interno.Nome.trim() !== nome) changes.push({ field: 'Nome', oldValue: interno.Nome, newValue: nome });
                 if (interno.CodigoSetor !== codigo_setor) changes.push({ field: 'CodigoSetor', oldValue: interno.CodigoSetor, newValue: codigo_setor });
-                if (interno.Grupo.trim() !== grupo) changes.push({ field: 'Grupo', oldValue: interno.Grupo, newValue: grupo });
+                
+                // Ignorar diff de grupo para existentes
 
                 if (changes.length > 0) {
+                    // Mantemos o grupo original no newData para não sobrescrever visualmente no preview,
+                    // mas a lógica de sync não vai usar esse campo para update.
+                    newData.grupo = interno.Grupo; 
                     alterados.push({ id_pulsus, nome, changes, newData });
                 }
             }
@@ -449,16 +457,17 @@ app.post('/integracao/sync', authenticateToken, async (req, res) => {
 
             if (existing.length > 0) {
                 // Update
-                const updateQ = `UPDATE Colaboradores SET CodigoSetor=@cod, Nome=@nome, Grupo=@grp, DataAlteracao=GETDATE(), MotivoAlteracao='Sincronização DB', UsuarioAlteracao=@user WHERE ID_Pulsus=@idp`;
+                // REGRA: NÃO ATUALIZAR GRUPO DE USUÁRIO EXISTENTE
+                const updateQ = `UPDATE Colaboradores SET CodigoSetor=@cod, Nome=@nome, DataAlteracao=GETDATE(), MotivoAlteracao='Sincronização DB', UsuarioAlteracao=@user WHERE ID_Pulsus=@idp`;
                 await executeQuery(dbConfig, updateQ, [
                     { name: 'cod', type: TYPES.Int, value: codigo_setor },
                     { name: 'nome', type: TYPES.NVarChar, value: nome },
-                    { name: 'grp', type: TYPES.NVarChar, value: grupo },
                     { name: 'idp', type: TYPES.Int, value: id_pulsus },
                     { name: 'user', type: TYPES.NVarChar, value: adminUser }
                 ]);
             } else {
                 // Insert
+                // REGRA: Se grupo vazio (Outros), já vem tratado do preview
                 const insertQ = `INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao) VALUES (@idp, @cod, @nome, @grp, 'Carro', 1, @user)`;
                 await executeQuery(dbConfig, insertQ, [
                     { name: 'idp', type: TYPES.Int, value: id_pulsus },

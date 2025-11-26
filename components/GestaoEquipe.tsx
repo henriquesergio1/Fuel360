@@ -2,6 +2,8 @@
 
 
 
+
+
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { Colaborador, TipoVeiculoReembolso, DiffItem } from '../types.ts';
@@ -121,6 +123,7 @@ const SyncAuditModal: React.FC<{
                                         <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mr-2">{previewData.novos.length}</span>
                                         Novos Colaboradores
                                     </h4>
+                                    <p className="text-[10px] text-emerald-600/70 mb-2">Se o grupo não existir no banco externo, será criado como <b>"Outros"</b>.</p>
                                     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                                         <table className="w-full text-xs text-left">
                                             <thead className="bg-emerald-50 text-emerald-700 font-semibold border-b border-emerald-100">
@@ -156,10 +159,16 @@ const SyncAuditModal: React.FC<{
 
                             {previewData.alterados.length > 0 && (
                                 <div>
-                                    <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center">
-                                        <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full mr-2">{previewData.alterados.length}</span>
-                                        Alterações de Cadastro (Conflitos)
-                                    </h4>
+                                    <div className="flex justify-between items-center mb-2">
+                                        <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wider flex items-center">
+                                            <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full mr-2">{previewData.alterados.length}</span>
+                                            Alterações de Cadastro (Conflitos)
+                                        </h4>
+                                    </div>
+                                    <p className="text-[10px] text-amber-600/70 mb-2 font-bold bg-amber-50 p-2 rounded border border-amber-100">
+                                        <ExclamationIcon className="w-3 h-3 inline mr-1"/>
+                                        O grupo definido no sistema será mantido. A sincronização atualiza apenas Nome e Setor de usuários existentes.
+                                    </p>
                                     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                                         <table className="w-full text-xs text-left">
                                             <thead className="bg-amber-50 text-amber-700 font-semibold border-b border-amber-100">
