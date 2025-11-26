@@ -9,8 +9,8 @@ services:
     container_name: fuel360-api
     restart: unless-stopped
     ports:
-      # Mapeia a porta 3000 do container para a porta 3030 do seu servidor.
-      - "3030:3000"
+      # Mapeia a porta 3000 do container para a porta 3031 do seu servidor (Fuel360).
+      - "3031:3000"
     
     # As variáveis de ambiente (senhas, etc.) devem ser configuradas diretamente
     # no Portainer ou em um arquivo .env na mesma pasta do docker-compose.
@@ -31,7 +31,7 @@ services:
     container_name: fuel360-frontend
     restart: unless-stopped
     ports:
-      # Mapeia a porta 80 do container para a porta 8080 do servidor.
-      - "8080:80"
+      # Mapeia a porta 80 do container para a porta 8081 do servidor (Fuel360).
+      - "8081:80"
     depends_on:
       - fuel360-api
