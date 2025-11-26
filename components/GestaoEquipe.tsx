@@ -1,0 +1,412 @@
+
+import React, { useState, useContext, useMemo } from 'react';
+import { DataContext } from '../context/DataContext.tsx';
+import { Colaborador, TipoVeiculoReembolso } from '../types.ts';
+import { PlusCircleIcon, PencilIcon, TrashIcon, UsersIcon, XCircleIcon, CheckCircleIcon, ExclamationIcon, SpinnerIcon, CarIcon, MotoIcon } from './icons.tsx';
+
+// --- Modal de Colaborador ---
+const ColaboradorModal: React.FC<{ 
+    isOpen: boolean; 
+    onClose: () => void; 
+    colaborador: Colaborador | null;
+    initialGroup: string; 
+}> = ({ isOpen, onClose, colaborador, initialGroup }) => {
+    const { colaboradores, addColaborador, updateColaborador } = useContext(DataContext);
+    const [formData, setFormData] = useState<Partial<Colaborador>>({});
+    const [motivo, setMotivo] = useState('');
+    const [error, setError] = useState('');
+    const [saving, setSaving] = useState(false);
+
+    React.useEffect(() => {
+        setError('');
+        setMotivo('');
+        setSaving(false);
+        if (colaborador) {
+            setFormData(colaborador);
+        } else {
+            setFormData({
+                ID_Pulsus: undefined,
+                CodigoSetor: undefined,
+                Nome: '',
+                Grupo: initialGroup,
+                TipoVeiculo: 'Carro',
+                Ativo: true
+            });
+        }
+    }, [colaborador, isOpen, initialGroup]);
+
+    if (!isOpen) return null;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
+
+        if (!formData.Nome || !formData.ID_Pulsus || !formData.CodigoSetor) {
+            setError("Todos os campos são obrigatórios.");
+            return;
+        }
+
+        if (colaborador && !motivo.trim()) {
+            setError("É obrigatório informar o motivo da alteração para auditoria.");
+            return;
+        }
+
+        const newIdPulsus = Number(formData.ID_Pulsus);
+        const newSectorCode = Number(formData.CodigoSetor);
+        const currentGroup = formData.Grupo || initialGroup;
+
+        const pulsusExists = colaboradores.some(c => 
+            c.ID_Pulsus === newIdPulsus && 
+            c.ID_Colaborador !== formData.ID_Colaborador 
+        );
+        if (pulsusExists) {
+            setError(`O ID Pulsus ${newIdPulsus} já está em uso.`);
+            return;
+        }
+
+        const sectorExistsInGroup = colaboradores.some(c => 
+            c.Grupo === currentGroup && 
+            c.CodigoSetor === newSectorCode &&
+            c.ID_Colaborador !== formData.ID_Colaborador 
+        );
+        if (sectorExistsInGroup) {
+            setError(`O código de setor ${newSectorCode} já está sendo utilizado no grupo ${currentGroup}.`);
+            return;
+        }
+
+        const data: Colaborador = {
+            ID_Colaborador: colaborador ? colaborador.ID_Colaborador : 0,
+            ID_Pulsus: newIdPulsus,
+            CodigoSetor: newSectorCode,
+            Nome: formData.Nome,
+            Grupo: currentGroup,
+            TipoVeiculo: formData.TipoVeiculo as TipoVeiculoReembolso,
+            Ativo: formData.Ativo !== undefined ? formData.Ativo : true,
+            MotivoAlteracao: colaborador ? motivo : undefined
+        };
+
+        setSaving(true);
+        try {
+            if (colaborador) await updateColaborador(data);
+            else await addColaborador(data);
+            onClose();
+        } catch (err: any) {
+            setError(err.message || 'Erro ao salvar.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 w-full max-w-lg max-h-[90vh] overflow-y-auto relative">
+                <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-600 to-cyan-500"></div>
+                
+                <div className="flex justify-between items-center mb-8">
+                    <div>
+                        <h3 className="text-2xl font-bold text-slate-800">{colaborador ? 'Editar Colaborador' : `Novo ${initialGroup}`}</h3>
+                        <p className="text-slate-500 text-sm">Preencha os dados do funcionário.</p>
+                    </div>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-2 rounded-full hover:bg-slate-100"><XCircleIcon className="w-6 h-6"/></button>
+                </div>
+                
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-xl flex items-start text-sm">
+                            <ExclamationIcon className="w-5 h-5 mr-3 shrink-0"/>
+                            <span>{error}</span>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-5">
+                        <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase ml-1">Setor (Cód)</label>
+                            <input 
+                                type="number" 
+                                value={formData.CodigoSetor ?? ''} 
+                                onChange={e => setFormData({...formData, CodigoSetor: Number(e.target.value)})} 
+                                className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-600 focus:border-transparent font-mono text-lg shadow-sm focus:bg-white transition-colors" 
+                                placeholder="101"
+                                autoFocus={!colaborador}
+                                required 
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase ml-1">ID (Pulsus)</label>
+                            <input 
+                                type="number" 
+                                value={formData.ID_Pulsus ?? ''} 
+                                onChange={e => setFormData({...formData, ID_Pulsus: Number(e.target.value)})} 
+                                className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-600 focus:border-transparent font-mono text-lg shadow-sm focus:bg-white transition-colors" 
+                                placeholder="550"
+                                required 
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="block text-xs font-bold text-slate-500 uppercase ml-1">Nome Completo</label>
+                        <input 
+                            type="text" 
+                            value={formData.Nome} 
+                            onChange={e => setFormData({...formData, Nome: e.target.value})} 
+                            className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-600 focus:border-transparent shadow-sm focus:bg-white transition-colors" 
+                            placeholder="Nome do funcionário"
+                            required 
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-5 items-end">
+                        <div className="space-y-1">
+                            <label className="block text-xs font-bold text-slate-500 uppercase ml-1">Veículo</label>
+                            <select value={formData.TipoVeiculo} onChange={e => setFormData({...formData, TipoVeiculo: e.target.value as any})} className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-xl p-3 focus:ring-2 focus:ring-blue-600 focus:border-transparent appearance-none shadow-sm focus:bg-white transition-colors">
+                                <option value="Carro">Carro</option>
+                                <option value="Moto">Moto</option>
+                            </select>
+                        </div>
+                        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-3 h-[50px] shadow-sm">
+                            <input type="checkbox" id="activeCheck" checked={formData.Ativo} onChange={e => setFormData({...formData, Ativo: e.target.checked})} className="h-5 w-5 rounded bg-white border-slate-300 text-blue-600 focus:ring-blue-500" />
+                            <label htmlFor="activeCheck" className="ml-3 text-sm font-medium text-slate-700 cursor-pointer select-none">Cadastro Ativo</label>
+                        </div>
+                    </div>
+
+                    {colaborador && (
+                        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl mt-2">
+                            <label className="block text-xs font-bold text-blue-700 uppercase mb-2">Motivo da Alteração (Auditoria)</label>
+                            <textarea 
+                                value={motivo}
+                                onChange={e => setMotivo(e.target.value)}
+                                className="w-full bg-white text-slate-900 border border-blue-100 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Descreva o motivo..."
+                                rows={2}
+                                required
+                            />
+                        </div>
+                    )}
+
+                    <div className="flex justify-end pt-6 space-x-3">
+                        <button type="button" onClick={onClose} disabled={saving} className="bg-white hover:bg-slate-50 text-slate-600 font-bold py-3 px-6 rounded-xl transition disabled:opacity-50 border border-slate-200 shadow-sm">Cancelar</button>
+                        <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl flex items-center transition disabled:opacity-50 shadow-lg shadow-blue-600/20">
+                            {saving ? <SpinnerIcon className="w-5 h-5 mr-2"/> : <CheckCircleIcon className="w-5 h-5 mr-2"/>} 
+                            {saving ? 'Salvando...' : 'Salvar'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
+const DeleteConfirmationModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: () => void;
+    colabName: string;
+}> = ({ isOpen, onClose, onConfirm, colabName }) => {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    if (!isOpen) return null;
+
+    const handleConfirm = async () => {
+        setLoading(true);
+        setError('');
+        try {
+            await onConfirm();
+            onClose();
+        } catch (e: any) {
+            setError(e.message || 'Erro ao excluir.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 w-full max-w-sm text-center">
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <TrashIcon className="w-8 h-8 text-red-500"/>
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Excluir Colaborador?</h3>
+                <p className="text-slate-500 text-sm mb-6">
+                    Você vai excluir <strong>{colabName}</strong>. Esta ação não pode ser desfeita e será registrada na auditoria.
+                </p>
+
+                {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-600">{error}</div>}
+
+                <div className="flex space-x-3 justify-center">
+                    <button onClick={onClose} disabled={loading} className="bg-white hover:bg-slate-50 text-slate-700 px-6 py-3 rounded-xl font-bold text-sm border border-slate-200 shadow-sm">Cancelar</button>
+                    <button onClick={handleConfirm} disabled={loading} className="bg-red-600 hover:bg-red-500 text-white px-6 py-3 rounded-xl font-bold text-sm flex items-center disabled:opacity-50 shadow-lg shadow-red-600/20">
+                        {loading ? <SpinnerIcon className="w-4 h-4 mr-2"/> : 'Sim, Excluir'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const GroupModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    onSave: (name: string) => void;
+}> = ({ isOpen, onClose, onSave }) => {
+    const [name, setName] = useState('');
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 w-full max-w-sm">
+                <h3 className="text-lg font-bold text-slate-900 mb-4">Criar Novo Grupo</h3>
+                <input 
+                    type="text" 
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    className="w-full bg-slate-50 text-slate-900 border border-slate-200 rounded-xl p-3 mb-6 focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none shadow-sm focus:bg-white transition-colors"
+                    placeholder="Ex: Supervisor"
+                    autoFocus
+                />
+                <div className="flex justify-end space-x-2">
+                    <button onClick={onClose} className="bg-white hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold border border-slate-200 shadow-sm">Cancelar</button>
+                    <button onClick={() => { if(name) onSave(name); }} disabled={!name} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-50 shadow-md">Criar</button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const GestaoEquipe: React.FC = () => {
+    const { colaboradores, updateColaborador, deleteColaborador } = useContext(DataContext);
+    const [isColabModalOpen, setIsColabModalOpen] = useState(false);
+    const [editingColab, setEditingColab] = useState<Colaborador | null>(null);
+    const [customGroups, setCustomGroups] = useState<string[]>([]);
+    const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+    const [colabToDelete, setColabToDelete] = useState<Colaborador | null>(null);
+    
+    const grupos = useMemo(() => {
+        const g = new Set(colaboradores.map(c => c.Grupo));
+        g.add('Vendedor');
+        g.add('Promotor');
+        customGroups.forEach(grp => g.add(grp));
+        return Array.from(g).sort();
+    }, [colaboradores, customGroups]);
+
+    const [activeTab, setActiveTab] = useState(grupos[0] || 'Vendedor');
+
+    const filteredColaboradores = useMemo(() => {
+        return colaboradores.filter(c => c.Grupo === activeTab);
+    }, [colaboradores, activeTab]);
+
+    const handleEditColab = (c: Colaborador) => { setEditingColab(c); setIsColabModalOpen(true); };
+    const handleNewColab = () => { setEditingColab(null); setIsColabModalOpen(true); };
+    const confirmDelete = async () => { if (colabToDelete) await deleteColaborador(colabToDelete.ID_Colaborador); };
+    const handleCreateGroup = (name: string) => { if (!grupos.includes(name)) setCustomGroups(prev => [...prev, name]); setActiveTab(name); setIsGroupModalOpen(false); };
+
+    return (
+        <div className="space-y-8">
+            <ColaboradorModal isOpen={isColabModalOpen} onClose={() => setIsColabModalOpen(false)} colaborador={editingColab} initialGroup={activeTab} />
+            <GroupModal isOpen={isGroupModalOpen} onClose={() => setIsGroupModalOpen(false)} onSave={handleCreateGroup} />
+            <DeleteConfirmationModal isOpen={!!colabToDelete} onClose={() => setColabToDelete(null)} onConfirm={confirmDelete} colabName={colabToDelete?.Nome || ''} />
+
+            <div className="flex justify-between items-end">
+                <div>
+                    <h2 className="text-3xl font-extrabold text-slate-800 mb-2 tracking-tight">Gestão de Equipe</h2>
+                    <p className="text-slate-500 font-medium">Organização de colaboradores por grupos e setores.</p>
+                </div>
+                <button onClick={handleNewColab} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl flex items-center shadow-lg shadow-blue-600/20 transition-all hover:-translate-y-0.5">
+                    <PlusCircleIcon className="w-5 h-5 mr-2" /> Novo {activeTab}
+                </button>
+            </div>
+
+            {/* Modern Tabs - Corporate Light Theme */}
+            <div className="flex items-center border-b border-slate-200 pb-1">
+                <div className="flex space-x-2 overflow-x-auto pb-2 flex-grow scrollbar-hide">
+                    {grupos.map(grupo => (
+                        <button
+                            key={grupo}
+                            onClick={() => setActiveTab(grupo)}
+                            className={`px-5 py-2.5 text-sm font-medium rounded-lg transition-all flex items-center whitespace-nowrap border ${
+                                activeTab === grupo
+                                    ? 'bg-slate-800 text-white shadow-md shadow-slate-900/10'
+                                    : 'bg-transparent text-slate-500 hover:text-blue-600 border-transparent hover:bg-white'
+                            }`}
+                        >
+                            <UsersIcon className={`w-4 h-4 mr-2 ${activeTab === grupo ? 'text-white' : 'text-slate-400'}`} />
+                            {grupo}
+                        </button>
+                    ))}
+                </div>
+                <button onClick={() => setIsGroupModalOpen(true)} className="ml-2 p-2.5 text-slate-500 hover:text-blue-600 bg-white hover:bg-slate-50 rounded-lg transition-colors border border-slate-200 shadow-sm">
+                    <PlusCircleIcon className="w-5 h-5" />
+                </button>
+            </div>
+
+            {/* Tabela */}
+            <div className="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-200">
+                <table className="w-full text-sm text-left text-slate-600">
+                    <thead className="text-xs text-slate-400 uppercase bg-slate-50/50 border-b border-slate-100 font-semibold">
+                        <tr>
+                            <th className="p-5 tracking-wider">ID Pulsus</th>
+                            <th className="p-5 tracking-wider">Nome</th>
+                            <th className="p-5 tracking-wider">Cód. Setor</th>
+                            <th className="p-5 tracking-wider text-center">Veículo</th>
+                            <th className="p-5 tracking-wider text-center">Status</th>
+                            <th className="p-5 tracking-wider text-right">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                        {filteredColaboradores.map(colab => (
+                            <tr key={colab.ID_Colaborador} className="hover:bg-slate-50 group transition-colors">
+                                <td className="p-5 font-mono text-slate-500">{colab.ID_Pulsus}</td>
+                                <td className="p-5 font-bold text-slate-800 text-base">
+                                    {colab.Nome}
+                                    {colab.UsuarioAlteracao && (
+                                        <div className="text-[10px] font-normal text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1 flex items-center">
+                                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full mr-1.5"></span>
+                                            Ult. alteração: {colab.UsuarioAlteracao}
+                                        </div>
+                                    )}
+                                </td>
+                                <td className="p-5">
+                                    <span className="bg-slate-100 text-slate-600 font-mono font-bold px-3 py-1 rounded-md text-xs border border-slate-200 shadow-sm">
+                                        {colab.CodigoSetor}
+                                    </span>
+                                </td>
+                                <td className="p-5 text-center">
+                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold border ${colab.TipoVeiculo === 'Carro' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-amber-50 text-amber-600 border-amber-200'}`}>
+                                        {colab.TipoVeiculo === 'Carro' ? <CarIcon className="w-3 h-3 mr-1.5"/> : <MotoIcon className="w-3 h-3 mr-1.5"/>}
+                                        {colab.TipoVeiculo}
+                                    </span>
+                                </td>
+                                <td className="p-5 text-center">
+                                    {colab.Ativo ? (
+                                        <span className="text-emerald-600 text-xs font-bold flex justify-center items-center bg-emerald-50 px-2 py-1 rounded-full border border-emerald-100"><CheckCircleIcon className="w-4 h-4 mr-1.5"/> Ativo</span>
+                                    ) : (
+                                        <span className="text-red-500 text-xs font-bold flex justify-center items-center bg-red-50 px-2 py-1 rounded-full border border-red-100"><XCircleIcon className="w-4 h-4 mr-1.5"/> Inativo</span>
+                                    )}
+                                </td>
+                                <td className="p-5 text-right space-x-2">
+                                    <button onClick={() => handleEditColab(colab)} className="text-slate-400 hover:text-blue-600 p-2 rounded-lg hover:bg-blue-50 transition-colors border border-transparent hover:border-blue-100" title="Editar"><PencilIcon className="w-5 h-5"/></button>
+                                    <button onClick={() => setColabToDelete(colab)} className="text-slate-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors border border-transparent hover:border-red-100" title="Excluir"><TrashIcon className="w-5 h-5"/></button>
+                                </td>
+                            </tr>
+                        ))}
+                        {filteredColaboradores.length === 0 && (
+                            <tr>
+                                <td colSpan={6} className="p-12 text-center text-slate-500">
+                                    <div className="flex flex-col items-center">
+                                        <div className="bg-slate-50 p-4 rounded-full mb-3">
+                                            <UsersIcon className="w-8 h-8 text-slate-300"/>
+                                        </div>
+                                        <p className="font-medium">Nenhum colaborador no grupo <strong>{activeTab}</strong>.</p>
+                                        <p className="text-xs mt-1 text-slate-400">Clique em "Novo {activeTab}" para começar.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+};

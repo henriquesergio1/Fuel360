@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerador de Licença - Frete360</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Correção para o aviso do Webkit/Edge */
+        html {
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
+        body { background-color: #0f172a; color: #e2e8f0; }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="glass rounded-xl shadow-2xl p-8 max-w-md w-full">
+        <div class="flex flex-col items-center mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" class="w-16 h-16 mb-4">
+                <path d="M30 35 L50 25 L70 35 L70 65 L50 75 L30 65 Z" fill="#0ea5e9" opacity="0.9" />
+                <path d="M30 35 L50 45 L70 35" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M50 45 L50 75" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M50 10 A 40 40 0 0 1 90 50" stroke="#ffffff" stroke-width="6" stroke-linecap="round" />
+                <path d="M90 50 L82 42 M90 50 L98 42" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M50 90 A 40 40 0 0 1 10 50" stroke="#ffffff" stroke-width="6" stroke-linecap="round" />
+                <path d="M10 50 L18 58 M10 50 L2 58" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <h1 class="text-2xl font-bold text-white">Gerador de Licença</h1>
+            <p class="text-sky-400 text-sm">Uso exclusivo do desenvolvedor</p>
+        </div>
+
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-slate-400 mb-1">Chave Secreta (Backend)</label>
+                <div class="relative">
+                    <input type="password" id="secret" value="fretes-secret-key-change-in-prod" class="w-full bg-slate-900 text-slate-300 border border-slate-700 rounded-md p-2 text-xs font-mono focus:ring-sky-500 focus:border-sky-500" />
+                    <button onclick="toggleSecret()" class="absolute right-2 top-2 text-xs text-sky-500 hover:text-sky-400 font-bold">Mostrar</button>
+                </div>
+                <p class="text-[10px] text-slate-500 mt-1">Deve ser idêntica à variável JWT_SECRET do servidor.</p>
+            </div>
+
+            <hr class="border-slate-700 my-4"/>
+
+            <div>
+                <label class="block text-sm font-medium text-white mb-1">Nome do Cliente</label>
+                <input type="text" id="clientName" placeholder="Ex: Transportadora ABC" class="w-full bg-slate-700 text-white border border-slate-600 rounded-md p-3 focus:ring-sky-500 focus:border-sky-500" />
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-white mb-1">Validade (Dias)</label>
+                <input type="number" id="days" value="30" class="w-full bg-slate-700 text-white border border-slate-600 rounded-md p-3 focus:ring-sky-500 focus:border-sky-500" />
+            </div>
+
+            <button onclick="generateLicense()" class="w-full bg-sky-600 hover:bg-sky-500 text-white font-bold py-3 rounded-md transition duration-200 shadow-lg shadow-sky-900/20 mt-4">
+                Gerar Chave
+            </button>
+
+            <div id="resultArea" class="hidden mt-6">
+                <label class="block text-xs font-bold text-green-400 mb-1 uppercase">Chave Gerada (Copie e envie):</label>
+                <textarea id="output" readonly class="w-full h-32 bg-slate-900 text-green-300 border border-green-900 rounded-md p-3 text-xs font-mono break-all focus:outline-none"></textarea>
+                <button onclick="copyToClipboard()" class="mt-2 w-full bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold py-2 rounded flex justify-center items-center">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                    Copiar para Área de Transferência
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleSecret() {
+            const input = document.getElementById('secret');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        function base64UrlEncode(str) {
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(str)))
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=+$/, '');
+        }
+
+        function strToUint8Array(str) {
+            const encoder = new TextEncoder();
+            return encoder.encode(str);
+        }
+
+        async function signHMAC(keyStr, data) {
+            const keyData = strToUint8Array(keyStr);
+            const cryptoKey = await window.crypto.subtle.importKey(
+                "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+            );
+            const signature = await window.crypto.subtle.sign(
+                "HMAC", cryptoKey, strToUint8Array(data)
+            );
+            return base64UrlEncode(new Uint8Array(signature));
+        }
+
+        async function generateLicense() {
+            const secret = document.getElementById('secret').value;
+            const client = document.getElementById('clientName').value;
+            const days = parseInt(document.getElementById('days').value);
+
+            if (!secret || !client || !days) {
+                alert('Preencha todos os campos.');
+                return;
+            }
+
+            const header = { alg: "HS256", typ: "JWT" };
+            const now = Math.floor(Date.now() / 1000);
+            const exp = now + (days * 24 * 60 * 60);
+
+            const payload = {
+                client: client,
+                type: 'PRO',
+                createdAt: new Date().toISOString(),
+                iat: now,
+                exp: exp
+            };
+
+            const encodedHeader = base64UrlEncode(strToUint8Array(JSON.stringify(header)));
+            const encodedPayload = base64UrlEncode(strToUint8Array(JSON.stringify(payload)));
+            
+            const dataToSign = `${encodedHeader}.${encodedPayload}`;
+            
+            try {
+                const signature = await signHMAC(secret, dataToSign);
+                const token = `${dataToSign}.${signature}`;
+                
+                document.getElementById('output').value = token;
+                document.getElementById('resultArea').classList.remove('hidden');
+            } catch (e) {
+                alert('Erro ao gerar criptografia: ' + e.message);
+            }
+        }
+
+        function copyToClipboard() {
+            const copyText = document.getElementById("output");
+            copyText.select();
+            copyText.setSelectionRange(0, 99999); 
+            navigator.clipboard.writeText(copyText.value);
+            alert("Licença copiada!");
+        }
+    </script>
+</body>
+</html>

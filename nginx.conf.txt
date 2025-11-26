@@ -1,0 +1,63 @@
+
+
+server {
+    listen 80;
+    server_name localhost;
+
+    # Aumenta o limite do corpo da requisição para evitar erro 413 em grandes importações
+    client_max_body_size 50M;
+
+    # Adiciona os tipos MIME padrão do Nginx
+    include /etc/nginx/mime.types;
+
+    # =========================================================================
+    # CABEÇALHOS DE SEGURANÇA GLOBAIS
+    # =========================================================================
+    # Impede que o navegador "adivinhe" o tipo de arquivo (proteção MIME sniffing)
+    add_header X-Content-Type-Options "nosniff" always;
+    # Proteção contra Clickjacking (impede que o site seja aberto em iframes de outros sites)
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    # Proteção XSS básica para navegadores antigos
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Desativa cache para o index.html e arquivos estáticos principais para garantir atualizações imediatas
+    location ~* \.(html|js|css)$ {
+        add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+        add_header Pragma "no-cache";
+        expires off;
+    }
+
+    # Configuração de Cache para Imagens e Fontes (Melhora performance / remove aviso de Cache-Control missing)
+    location ~* \.(jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        expires 1y;
+    }
+
+    # Configuração do Proxy Reverso para a API
+    # O navegador chama http://[IP]:8080/api/veiculos
+    # O Nginx reescreve para http://fretes-api:3000/veiculos
+    location /api/ {
+        rewrite ^/api/(.*) /$1 break;
+        proxy_pass http://fretes-api:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        # IMPORTANTE: Forçar o repasse do cabeçalho de Autorização para o Login funcionar
+        proxy_set_header Authorization $http_authorization;
+        proxy_cache_bypass $http_upgrade;
+        
+        # Não cachear respostas da API
+        add_header Cache-Control "no-store, no-cache, must-revalidate";
+    }
+
+    # Configuração do Frontend (SPA)
+    location / {
+        # Tenta servir o arquivo solicitado diretamente.
+        # Se falhar, redireciona para /index.html para o roteamento do React.
+        try_files $uri $uri/ /index.html;
+    }
+}

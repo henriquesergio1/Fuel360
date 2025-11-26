@@ -1,0 +1,28 @@
+{
+  "name": "fretes-frontend",
+  "version": "1.2.47",
+  "private": true,
+  "scripts": {
+    "dev": "esbuild index.tsx --bundle --outfile=dist/bundle.js --loader:.tsx=tsx --loader:.ts=ts --serve --servedir=.",
+    "build": "mkdir -p dist && npm run build:css && esbuild index.tsx --bundle --outfile=dist/bundle.js --minify --loader:.tsx=tsx --loader:.ts=ts",
+    "build:prod": "mkdir -p dist && npm run build:css && esbuild index.tsx --bundle --outfile=dist/bundle.js --loader:.tsx=tsx --loader:.ts=ts",
+    "build:css": "tailwindcss -i ./tailwind-input.css -o ./dist/output.css --minify",
+    "build:js": "esbuild index.tsx --bundle --outfile=dist/bundle.js --minify --loader:.tsx=tsx --loader:.ts=ts"
+  },
+  "dependencies": {
+    "papaparse": "^5.3.2",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "leaflet": "^1.9.4",
+    "react-leaflet": "^4.2.1"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.19",
+    "esbuild": "^0.20.2",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "@types/leaflet": "^1.9.3",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0"
+  }
+}
