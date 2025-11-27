@@ -1,4 +1,8 @@
 
+
+
+
+
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { Colaborador, ConfigReembolso, SystemConfig, Ausencia } from '../types.ts';
 import * as api from '../services/apiService.ts';
@@ -13,6 +17,8 @@ interface DataContextType {
     addColaborador: (colaborador: Colaborador) => Promise<void>;
     updateColaborador: (colaborador: Colaborador) => Promise<void>;
     deleteColaborador: (id: number) => Promise<void>;
+    moveColaboradores: (ids: number[], newGroup: string) => Promise<void>; // Novo
+    bulkUpdateColaboradores: (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string) => Promise<void>; // Novo v1.5
     saveConfigReembolso: (config: ConfigReembolso) => Promise<void>;
     updateSystemConfig: (config: SystemConfig) => Promise<void>;
     
@@ -75,6 +81,18 @@ export const DataProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         setColaboradores(prev => prev.filter(c => c.ID_Colaborador !== id));
     };
 
+    // Novo: Movimentação em Massa (Grupo)
+    const moveColaboradores = async (ids: number[], newGroup: string) => {
+        await api.moveColaboradoresToGroup(ids, newGroup);
+        await loadApiData(); 
+    };
+
+    // Novo: Atualização em Massa (Campos Gerais)
+    const bulkUpdateColaboradores = async (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string) => {
+        await api.bulkUpdateColaboradores(ids, field, value, reason);
+        await loadApiData();
+    };
+
     const saveConfigReembolso = async (config: ConfigReembolso) => {
         await api.updateFuelConfig(config);
         setConfigReembolso(config);
@@ -111,6 +129,8 @@ export const DataProvider: React.FC<{children: ReactNode}> = ({ children }) => {
             addColaborador,
             updateColaborador,
             deleteColaborador,
+            moveColaboradores,
+            bulkUpdateColaboradores,
             saveConfigReembolso,
             updateSystemConfig: updateSystemConfigHandler,
             addAusencia,

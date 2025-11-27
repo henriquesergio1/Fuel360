@@ -1,5 +1,9 @@
 
 
+
+
+
+
 import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia, IntegrationConfig, ImportPreviewResult, DiffItem } from '../types.ts';
 import * as mockApi from '../api/mockData.ts';
 
@@ -92,6 +96,9 @@ const RealService = {
     createColaborador: (c: Colaborador): Promise<Colaborador> => apiRequest('/colaboradores', 'POST', c),
     updateColaborador: (id: number, c: Colaborador): Promise<Colaborador> => apiRequest(`/colaboradores/${id}`, 'PUT', c),
     deleteColaborador: (id: number): Promise<void> => apiRequest(`/colaboradores/${id}`, 'DELETE'),
+    moveColaboradoresToGroup: (ids: number[], grupo: string): Promise<{count: number}> => apiRequest('/colaboradores/move', 'POST', { ids, grupo }),
+    // Novo v1.5.0
+    bulkUpdateColaboradores: (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string): Promise<{count: number}> => apiRequest('/colaboradores/update-field', 'POST', { ids, field, value, reason }),
     
     // Integração Externa (Refatorado)
     getIntegrationConfig: (): Promise<IntegrationConfig> => apiRequest('/integracao/config', 'GET'),
@@ -141,6 +148,12 @@ const MockService = {
     createColaborador: mockApi.createMockColaborador,
     updateColaborador: (id: number, c: Colaborador) => mockApi.updateMockColaborador(id, c),
     deleteColaborador: mockApi.deleteMockColaborador,
+    moveColaboradoresToGroup: async (ids: number[], grupo: string) => { await new Promise(r => setTimeout(r, 500)); return { count: ids.length }; },
+    bulkUpdateColaboradores: async (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string) => {
+         await new Promise(r => setTimeout(r, 500)); 
+         console.log(`MOCK BULK UPDATE: ${ids.length} items. Field: ${field}, Value: ${value}, Reason: ${reason}`);
+         return { count: ids.length }; 
+    },
     
     // Mock Import
     getIntegrationConfig: async () => ({ extDb_Host: '127.0.0.1', extDb_Port: 3306, extDb_User: 'root', extDb_Database: 'mock_db', extDb_Query: 'SELECT ...' }),
@@ -192,6 +205,8 @@ export const getColaboradores = USE_MOCK ? MockService.getColaboradores : RealSe
 export const createColaborador = USE_MOCK ? MockService.createColaborador : RealService.createColaborador;
 export const updateColaborador = USE_MOCK ? MockService.updateColaborador : RealService.updateColaborador;
 export const deleteColaborador = USE_MOCK ? MockService.deleteColaborador : RealService.deleteColaborador;
+export const moveColaboradoresToGroup = USE_MOCK ? MockService.moveColaboradoresToGroup : RealService.moveColaboradoresToGroup;
+export const bulkUpdateColaboradores = USE_MOCK ? MockService.bulkUpdateColaboradores : RealService.bulkUpdateColaboradores;
 
 // Integração
 export const getIntegrationConfig = USE_MOCK ? MockService.getIntegrationConfig : RealService.getIntegrationConfig;

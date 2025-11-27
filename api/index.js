@@ -1,6 +1,8 @@
 
 
 
+
+
 // Carrega as variáveis de ambiente
 require('dotenv').config();
 
@@ -302,6 +304,96 @@ app.put('/colaboradores/:id', authenticateToken, async (req, res) => {
         const { rows } = await executeQuery(dbConfig, q, p);
         res.json(rows[0]);
     } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+// NOVO: Rota para Mover em Massa (Bulk Update Group)
+app.post('/colaboradores/move', authenticateToken, async (req, res) => {
+    const { ids, grupo } = req.body;
+    const user = req.user.usuario;
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0 || !grupo) {
+        return res.status(400).json({ message: "Dados inválidos para movimentação." });
+    }
+
+    try {
+        let count = 0;
+        for (const id of ids) {
+             await executeQuery(dbConfig, 
+                `UPDATE Colaboradores SET Grupo=@grp, DataAlteracao=GETDATE(), UsuarioAlteracao=@user, MotivoAlteracao='Transferência em Massa' WHERE ID_Colaborador=@id`,
+                [
+                    {name:'grp', type:TYPES.NVarChar, value:grupo},
+                    {name:'user', type:TYPES.NVarChar, value:user},
+                    {name:'id', type:TYPES.Int, value:id}
+                ]
+             );
+             count++;
+        }
+
+        // Log único da operação
+        await executeQuery(dbConfig, 
+            `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'TRANSFERENCIA_MASSA', @detalhes)`, 
+            [
+                {name:'user', type:TYPES.NVarChar, value:user},
+                {name:'detalhes', type:TYPES.NVarChar, value:`Moveu ${count} colaboradores para o grupo ${grupo}`}
+            ]
+        );
+
+        res.json({ success: true, count, message: `Movidos ${count} colaboradores para ${grupo}.` });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: e.message });
+    }
+});
+
+// NOVO v1.5.0: Rota para Atualização de Campos Específicos em Massa (Veículo/Ativo)
+app.post('/colaboradores/update-field', authenticateToken, async (req, res) => {
+    const { ids, field, value, reason } = req.body;
+    const user = req.user.usuario;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0 || !field || value === undefined || !reason) {
+        return res.status(400).json({ message: "Dados inválidos ou motivo não informado." });
+    }
+
+    const allowedFields = {
+        'TipoVeiculo': { type: TYPES.NVarChar, col: 'TipoVeiculo' },
+        'Ativo': { type: TYPES.Bit, col: 'Ativo' }
+    };
+
+    if (!allowedFields[field]) {
+        return res.status(400).json({ message: "Campo inválido para atualização em massa." });
+    }
+
+    try {
+        let count = 0;
+        const config = allowedFields[field];
+
+        for (const id of ids) {
+            await executeQuery(dbConfig, 
+               `UPDATE Colaboradores SET ${config.col}=@val, DataAlteracao=GETDATE(), UsuarioAlteracao=@user, MotivoAlteracao=@motivo WHERE ID_Colaborador=@id`,
+               [
+                   {name:'val', type: config.type, value: value},
+                   {name:'user', type:TYPES.NVarChar, value:user},
+                   {name:'motivo', type:TYPES.NVarChar, value:reason},
+                   {name:'id', type:TYPES.Int, value:id}
+               ]
+            );
+            count++;
+       }
+
+       await executeQuery(dbConfig, 
+           `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'ATUALIZACAO_MASSA', @detalhes)`, 
+           [
+               {name:'user', type:TYPES.NVarChar, value:user},
+               {name:'detalhes', type:TYPES.NVarChar, value:`Atualizou ${field} para '${value}' em ${count} colaboradores. Motivo: ${reason}`}
+           ]
+       );
+
+       res.json({ success: true, count, message: `Atualizados ${count} colaboradores.` });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: e.message });
+    }
 });
 
 app.delete('/colaboradores/:id', authenticateToken, async (req, res) => {
