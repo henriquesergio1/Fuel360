@@ -1,4 +1,5 @@
 
+
 import { Colaborador, ConfigReembolso, Usuario, AuthResponse, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia } from '../types.ts';
 
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -257,7 +258,7 @@ export const saveMockCalculo = async (payload: SalvarCalculoPayload): Promise<{s
     return { success: true, id: newId };
 };
 
-export const getMockRelatorio = async (startDate: string, endDate: string, colabId?: string): Promise<ItemRelatorio[]> => {
+export const getMockRelatorio = async (startDate: string, endDate: string, colabId?: string, grupo?: string): Promise<ItemRelatorio[]> => {
     await delay(600);
     const headers: MockHeader[] = getStorage('MOCK_REL_HEADERS', []);
     const details: MockDetail[] = getStorage('MOCK_REL_DETAILS', []);
@@ -277,6 +278,7 @@ export const getMockRelatorio = async (startDate: string, endDate: string, colab
     details.forEach(d => {
         if (validCalculoIds.has(d.ID_Calculo)) {
             if (colabId && d.ID_Pulsus.toString() !== colabId) return;
+            if (grupo && d.Grupo !== grupo) return;
 
             const header = filteredHeaders.find(h => h.ID_Calculo === d.ID_Calculo);
             if (header) {
@@ -301,7 +303,7 @@ export const getMockRelatorio = async (startDate: string, endDate: string, colab
     return result.sort((a, b) => new Date(b.DataGeracao).getTime() - new Date(a.DataGeracao).getTime());
 };
 
-export const getMockRelatorioAnalitico = async (startDate: string, endDate: string, colabId?: string): Promise<ItemRelatorioAnalitico[]> => {
+export const getMockRelatorioAnalitico = async (startDate: string, endDate: string, colabId?: string, grupo?: string): Promise<ItemRelatorioAnalitico[]> => {
     await delay(700);
     const headers: MockHeader[] = getStorage('MOCK_REL_HEADERS', []);
     const details: MockDetail[] = getStorage('MOCK_REL_DETAILS', []);
@@ -323,6 +325,7 @@ export const getMockRelatorioAnalitico = async (startDate: string, endDate: stri
     const filteredDetails = details.filter(d => {
         if(!validCalculoIds.has(d.ID_Calculo)) return false;
         if(colabId && d.ID_Pulsus.toString() !== colabId) return false;
+        if(grupo && d.Grupo !== grupo) return false;
         return true;
     });
 

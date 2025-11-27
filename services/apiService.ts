@@ -4,6 +4,10 @@
 
 
 
+
+
+
+
 import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia, IntegrationConfig, ImportPreviewResult, DiffItem } from '../types.ts';
 import * as mockApi from '../api/mockData.ts';
 
@@ -38,11 +42,7 @@ const getToken = () => localStorage.getItem('AUTH_TOKEN');
 const handleResponse = async (response: Response, isLoginRequest: boolean = false) => {
     if (response.status === 401 || response.status === 403) {
         if (isLoginRequest) throw new Error('Falha na autenticação.');
-        
-        // CORREÇÃO MOBILE: Removemos o reload() forçado que causava loop infinito.
-        // Disparamos um evento para o AuthContext limpar o estado graciosamente.
         window.dispatchEvent(new CustomEvent('FUEL360_UNAUTHORIZED'));
-        
         throw new Error('Sessão expirada.');
     }
     if (response.status === 402) {
@@ -99,7 +99,8 @@ const RealService = {
     moveColaboradoresToGroup: (ids: number[], grupo: string): Promise<{count: number}> => apiRequest('/colaboradores/move', 'POST', { ids, grupo }),
     // Novo v1.5.0
     bulkUpdateColaboradores: (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string): Promise<{count: number}> => apiRequest('/colaboradores/update-field', 'POST', { ids, field, value, reason }),
-    
+    getSugestoesVinculo: (ids: number[]): Promise<any[]> => apiRequest('/colaboradores/sugestao-vinculo', 'POST', { ids }),
+
     // Integração Externa (Refatorado)
     getIntegrationConfig: (): Promise<IntegrationConfig> => apiRequest('/integracao/config', 'GET'),
     updateIntegrationConfig: (config: IntegrationConfig): Promise<void> => apiRequest('/integracao/config', 'PUT', config),
@@ -118,16 +119,21 @@ const RealService = {
     // Histórico e Relatórios
     checkCalculoExists: (periodo: string): Promise<boolean> => apiRequest(`/calculos/check-periodo?periodo=${encodeURIComponent(periodo)}`, 'GET').then(r => r.exists),
     saveCalculo: (payload: SalvarCalculoPayload): Promise<any> => apiRequest('/calculos', 'POST', payload),
-    getRelatorioReembolso: (start: string, end: string, colabId?: string): Promise<ItemRelatorio[]> => {
+    // Atualizado v1.5: Suporte a filtro de grupo
+    getRelatorioReembolso: (start: string, end: string, colabId?: string, grupo?: string): Promise<ItemRelatorio[]> => {
         const query = new URLSearchParams({ startDate: start, endDate: end });
         if(colabId) query.append('colaboradorId', colabId);
+        if(grupo) query.append('grupo', grupo);
         return apiRequest(`/relatorios/reembolso?${query.toString()}`, 'GET');
     },
-    getRelatorioAnalitico: (start: string, end: string, colabId?: string): Promise<ItemRelatorioAnalitico[]> => {
+    // Atualizado v1.5: Suporte a filtro de grupo e correção retroativa
+    getRelatorioAnalitico: (start: string, end: string, colabId?: string, grupo?: string): Promise<ItemRelatorioAnalitico[]> => {
         const query = new URLSearchParams({ startDate: start, endDate: end });
         if(colabId) query.append('colaboradorId', colabId);
+        if(grupo) query.append('grupo', grupo);
         return apiRequest(`/relatorios/analitico?${query.toString()}`, 'GET');
     },
+    corrigirAusenciasHistorico: (idsDiarios: number[]): Promise<{count: number}> => apiRequest('/calculos/corrigir-ausencias', 'POST', { idsDiarios }),
 
     // Logs
     logAction: (acao: string, detalhes: string): Promise<void> => apiRequest('/logs', 'POST', { acao, detalhes })
@@ -153,6 +159,15 @@ const MockService = {
          await new Promise(r => setTimeout(r, 500)); 
          console.log(`MOCK BULK UPDATE: ${ids.length} items. Field: ${field}, Value: ${value}, Reason: ${reason}`);
          return { count: ids.length }; 
+    },
+    getSugestoesVinculo: async (ids: number[]) => {
+        await new Promise(r => setTimeout(r, 800));
+        // Mock smart suggestion
+        return ids.map(id => ({
+             ID_Pulsus: id,
+             NomeSuggestion: `Sugestão Histórica ${id}`,
+             GrupoSuggestion: 'Vendedor'
+        }));
     },
     
     // Mock Import
@@ -185,8 +200,9 @@ const MockService = {
 
     checkCalculoExists: (periodo: string) => mockApi.checkMockCalculoExists(periodo).then(r => r.exists),
     saveCalculo: mockApi.saveMockCalculo,
-    getRelatorioReembolso: (start: string, end: string, colabId?: string) => mockApi.getMockRelatorio(start, end, colabId),
-    getRelatorioAnalitico: (start: string, end: string, colabId?: string) => mockApi.getMockRelatorioAnalitico(start, end, colabId),
+    getRelatorioReembolso: (start: string, end: string, colabId?: string, grupo?: string) => mockApi.getMockRelatorio(start, end, colabId, grupo),
+    getRelatorioAnalitico: (start: string, end: string, colabId?: string, grupo?: string) => mockApi.getMockRelatorioAnalitico(start, end, colabId, grupo),
+    corrigirAusenciasHistorico: async () => ({ count: 1 }),
 
     logAction: async () => {} 
 };
@@ -207,6 +223,7 @@ export const updateColaborador = USE_MOCK ? MockService.updateColaborador : Real
 export const deleteColaborador = USE_MOCK ? MockService.deleteColaborador : RealService.deleteColaborador;
 export const moveColaboradoresToGroup = USE_MOCK ? MockService.moveColaboradoresToGroup : RealService.moveColaboradoresToGroup;
 export const bulkUpdateColaboradores = USE_MOCK ? MockService.bulkUpdateColaboradores : RealService.bulkUpdateColaboradores;
+export const getSugestoesVinculo = USE_MOCK ? MockService.getSugestoesVinculo : RealService.getSugestoesVinculo;
 
 // Integração
 export const getIntegrationConfig = USE_MOCK ? MockService.getIntegrationConfig : RealService.getIntegrationConfig;
@@ -227,5 +244,6 @@ export const checkCalculoExists = USE_MOCK ? MockService.checkCalculoExists : Re
 export const saveCalculo = USE_MOCK ? MockService.saveCalculo : RealService.saveCalculo;
 export const getRelatorioReembolso = USE_MOCK ? MockService.getRelatorioReembolso : RealService.getRelatorioReembolso;
 export const getRelatorioAnalitico = USE_MOCK ? MockService.getRelatorioAnalitico : RealService.getRelatorioAnalitico;
+export const corrigirAusenciasHistorico = USE_MOCK ? MockService.corrigirAusenciasHistorico : RealService.corrigirAusenciasHistorico;
 
 export const logAction = USE_MOCK ? MockService.logAction : RealService.logAction;

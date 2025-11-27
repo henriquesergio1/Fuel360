@@ -121,6 +121,26 @@ export interface RegistroKM {
     Observacao?: string;
 }
 
+// Interface auxiliar para o Staging (Conferência)
+export interface StagingRecord {
+    id: string; // Unique ID for React Key
+    id_pulsus: number;
+    nome: string;
+    dataOriginal: string; // String do CSV (ex: 15/05/2025)
+    dataISO: string; // YYYY-MM-DD para ordenação
+    kmOriginal: number;
+    kmConsiderado: number;
+    
+    // Status Flags
+    isLowKm: boolean; // < 1km
+    isBlocked: boolean; // Ausência
+    blockReason?: string;
+    isEdited: boolean; // Ajuste manual
+    editReason?: string;
+    
+    colaboradorRef?: Colaborador; // Referencia se encontrado
+}
+
 export interface CalculoReembolso {
     Colaborador: Colaborador;
     TotalKM: number;
@@ -185,4 +205,8 @@ export interface ItemRelatorioAnalitico {
     TipoVeiculo: string;
     DataGeracao: string;
     PeriodoReferencia: string;
+    
+    // Novo v1.6: Flag de Conflito Retroativo
+    TemAusencia?: boolean;
+    MotivoAusencia?: string;
 }

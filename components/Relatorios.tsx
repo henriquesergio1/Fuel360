@@ -1,11 +1,15 @@
 
 
 
+
+
+
+
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
-import { getRelatorioReembolso, getRelatorioAnalitico } from '../services/apiService.ts';
+import { getRelatorioReembolso, getRelatorioAnalitico, corrigirAusenciasHistorico } from '../services/apiService.ts';
 import { ItemRelatorio, ItemRelatorioAnalitico } from '../types.ts';
-import { ChartBarIcon, SpinnerIcon, PrinterIcon, CarIcon, MotoIcon, UsersIcon, DocumentReportIcon, ChevronDownIcon, ChevronRightIcon } from './icons.tsx';
+import { ChartBarIcon, SpinnerIcon, PrinterIcon, CarIcon, MotoIcon, UsersIcon, DocumentReportIcon, ChevronDownIcon, ChevronRightIcon, ExclamationIcon, CheckCircleIcon } from './icons.tsx';
 
 type ReportView = 'SINTETICO' | 'ANALITICO';
 
@@ -20,6 +24,7 @@ export const Relatorios: React.FC = () => {
     const [startDate, setStartDate] = useState(firstDay);
     const [endDate, setEndDate] = useState(today);
     const [selectedColab, setSelectedColab] = useState('');
+    const [selectedGroup, setSelectedGroup] = useState('');
     
     // Data states
     const [reportData, setReportData] = useState<ItemRelatorio[]>([]);
@@ -32,6 +37,15 @@ export const Relatorios: React.FC = () => {
     // Expanded states for Analytic View
     const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
+    // Obter lista única de grupos para o filtro
+    const availableGroups = useMemo(() => {
+        const groups = new Set<string>();
+        colaboradores.forEach(c => {
+            if (c.Grupo) groups.add(c.Grupo);
+        });
+        return Array.from(groups).sort();
+    }, [colaboradores]);
+
     // Auto-load on mount
     useEffect(() => {
         handleSearch();
@@ -42,11 +56,11 @@ export const Relatorios: React.FC = () => {
         try {
             // Fetch both or just the active one? Fetching both for seamless switching.
             // Sintetico
-            const dataSintetico = await getRelatorioReembolso(startDate, endDate, selectedColab);
+            const dataSintetico = await getRelatorioReembolso(startDate, endDate, selectedColab, selectedGroup);
             setReportData(dataSintetico);
             
             // Analitico
-            const dataAnalitico = await getRelatorioAnalitico(startDate, endDate, selectedColab);
+            const dataAnalitico = await getRelatorioAnalitico(startDate, endDate, selectedColab, selectedGroup);
             setAnalyticData(dataAnalitico);
             
             setHasSearched(true);
@@ -73,7 +87,8 @@ export const Relatorios: React.FC = () => {
             info: ItemRelatorioAnalitico,
             items: ItemRelatorioAnalitico[],
             totalKm: number,
-            totalVal: number
+            totalVal: number,
+            hasConflicts: boolean
         }>();
 
         analyticData.forEach(item => {
@@ -82,13 +97,18 @@ export const Relatorios: React.FC = () => {
                     info: item,
                     items: [],
                     totalKm: 0,
-                    totalVal: 0
+                    totalVal: 0,
+                    hasConflicts: false
                 });
             }
             const group = groups.get(item.ID_Pulsus)!;
             group.items.push(item);
             group.totalKm += item.KM_Dia;
             group.totalVal += item.Valor_Dia;
+            
+            if (item.TemAusencia && item.Valor_Dia > 0) {
+                group.hasConflicts = true;
+            }
         });
 
         // Convert Map to Array and Sort by Name
@@ -97,6 +117,28 @@ export const Relatorios: React.FC = () => {
 
     const totalPago = reportData.reduce((acc, item) => acc + item.ValorReembolso, 0);
     const totalKM = reportData.reduce((acc, item) => acc + item.TotalKM, 0);
+    
+    // Identificar conflitos globais
+    const conflictingIds = useMemo(() => {
+        return analyticData
+            .filter(i => i.TemAusencia && i.Valor_Dia > 0)
+            .map(i => i.ID_Diario);
+    }, [analyticData]);
+
+    const handleFixConflicts = async () => {
+        if (conflictingIds.length === 0) return;
+        if (!confirm(`Deseja corrigir retroativamente ${conflictingIds.length} registros conflitantes? Isso zerará o valor pago e adicionará uma observação.`)) return;
+        
+        setLoading(true);
+        try {
+            await corrigirAusenciasHistorico(conflictingIds);
+            alert('Correção aplicada com sucesso! Atualizando relatório...');
+            handleSearch(); // Reload
+        } catch (e: any) {
+            alert('Erro ao corrigir: ' + e.message);
+            setLoading(false);
+        }
+    };
 
     return (
         <div className="space-y-8">
@@ -112,7 +154,7 @@ export const Relatorios: React.FC = () => {
 
             {/* Filter Card */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data Inicial</label>
                         <input 
@@ -130,6 +172,19 @@ export const Relatorios: React.FC = () => {
                             onChange={e => setEndDate(e.target.value)} 
                             className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-slate-800 focus:ring-2 focus:ring-blue-600 outline-none" 
                         />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Grupo (Opcional)</label>
+                        <select 
+                            value={selectedGroup} 
+                            onChange={e => setSelectedGroup(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-slate-800 focus:ring-2 focus:ring-blue-600 outline-none"
+                        >
+                            <option value="">Todos os Grupos</option>
+                            {availableGroups.map(g => (
+                                <option key={g} value={g}>{g}</option>
+                            ))}
+                        </select>
                     </div>
                     <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Colaborador (Opcional)</label>
@@ -157,6 +212,26 @@ export const Relatorios: React.FC = () => {
             {/* Results Area */}
             {hasSearched && (
                 <div className="animate-fade-in-up space-y-6">
+                    {/* Retroactive Conflict Alert */}
+                    {conflictingIds.length > 0 && (
+                        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex justify-between items-center animate-pulse">
+                            <div className="flex items-center text-red-700">
+                                <ExclamationIcon className="w-6 h-6 mr-3"/>
+                                <div>
+                                    <p className="font-bold">Atenção: Conflito Retroativo Detectado</p>
+                                    <p className="text-sm">Existem {conflictingIds.length} dias que foram pagos mas possuem ausência cadastrada posteriormente.</p>
+                                </div>
+                            </div>
+                            <button 
+                                onClick={handleFixConflicts}
+                                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-lg flex items-center"
+                            >
+                                <CheckCircleIcon className="w-4 h-4 mr-2"/>
+                                Corrigir Ausências no Histórico
+                            </button>
+                        </div>
+                    )}
+
                     {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center">
@@ -277,7 +352,7 @@ export const Relatorios: React.FC = () => {
                                                         {/* Parent Row */}
                                                         <tr 
                                                             onClick={() => toggleRow(group.info.ID_Pulsus)}
-                                                            className={`cursor-pointer transition-colors ${isExpanded ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}
+                                                            className={`cursor-pointer transition-colors ${group.hasConflicts ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-500' : (isExpanded ? 'bg-blue-50/50' : 'hover:bg-slate-50')}`}
                                                         >
                                                             <td className="p-4 text-center">
                                                                 <div className={`transition-transform duration-200 ${isExpanded ? 'text-blue-600' : 'text-slate-400'}`}>
@@ -289,6 +364,12 @@ export const Relatorios: React.FC = () => {
                                                                 <div className="text-[10px] text-slate-500 font-medium">
                                                                     ID: {group.info.ID_Pulsus} • {group.info.Grupo}
                                                                 </div>
+                                                                {group.hasConflicts && (
+                                                                    <div className="text-xs font-bold text-red-600 mt-1 flex items-center">
+                                                                        <ExclamationIcon className="w-3 h-3 mr-1"/>
+                                                                        Conflito de Ausência Detectado
+                                                                    </div>
+                                                                )}
                                                             </td>
                                                             <td className="p-4 text-center">
                                                                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${group.info.TipoVeiculo === 'Carro' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
@@ -314,25 +395,34 @@ export const Relatorios: React.FC = () => {
                                                                                 </tr>
                                                                             </thead>
                                                                             <tbody className="divide-y divide-slate-50 text-slate-600">
-                                                                                {group.items.sort((a,b) => new Date(a.DataOcorrencia).getTime() - new Date(b.DataOcorrencia).getTime()).map(day => (
-                                                                                    <tr key={day.ID_Diario} className="hover:bg-blue-50/30">
-                                                                                        <td className="px-4 py-2 font-mono">{new Date(day.DataOcorrencia).toLocaleDateString('pt-BR')}</td>
-                                                                                        <td className="px-4 py-2 text-right font-mono">{day.KM_Dia.toFixed(2)} km</td>
-                                                                                        <td className="px-4 py-2 text-right font-bold text-slate-700">
-                                                                                            {day.Observacao ? (
-                                                                                                <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                                                                                    day.Observacao.toLowerCase().includes('féria') ? 'bg-amber-100 text-amber-700' :
-                                                                                                    day.Observacao.toLowerCase().includes('atestado') ? 'bg-red-100 text-red-700' :
-                                                                                                    'bg-slate-200 text-slate-700'
-                                                                                                }`}>
-                                                                                                    {day.Observacao}
-                                                                                                </span>
-                                                                                            ) : (
-                                                                                                day.Valor_Dia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                                                                                            )}
-                                                                                        </td>
-                                                                                    </tr>
-                                                                                ))}
+                                                                                {group.items.sort((a,b) => new Date(a.DataOcorrencia).getTime() - new Date(b.DataOcorrencia).getTime()).map(day => {
+                                                                                    // Check conflict
+                                                                                    const isConflict = day.TemAusencia && day.Valor_Dia > 0;
+                                                                                    return (
+                                                                                        <tr key={day.ID_Diario} className={`hover:bg-blue-50/30 ${isConflict ? 'bg-red-50' : ''}`}>
+                                                                                            <td className="px-4 py-2 font-mono flex items-center">
+                                                                                                {new Date(day.DataOcorrencia).toLocaleDateString('pt-BR')}
+                                                                                                {isConflict && <span className="ml-2 text-red-600 text-[10px] font-bold border border-red-200 bg-white px-1 rounded flex items-center"><ExclamationIcon className="w-3 h-3 mr-1"/> Conflito: {day.MotivoAusencia}</span>}
+                                                                                            </td>
+                                                                                            <td className={`px-4 py-2 text-right font-mono ${isConflict ? 'text-red-600 line-through' : ''}`}>{day.KM_Dia.toFixed(2)} km</td>
+                                                                                            <td className="px-4 py-2 text-right font-bold text-slate-700">
+                                                                                                {day.Observacao ? (
+                                                                                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                                                                                        day.Observacao.toLowerCase().includes('féria') ? 'bg-amber-100 text-amber-700' :
+                                                                                                        day.Observacao.toLowerCase().includes('atestado') ? 'bg-red-100 text-red-700' :
+                                                                                                        'bg-slate-200 text-slate-700'
+                                                                                                    }`}>
+                                                                                                        {day.Observacao}
+                                                                                                    </span>
+                                                                                                ) : (
+                                                                                                    <span className={isConflict ? 'text-red-600 line-through' : ''}>
+                                                                                                        {day.Valor_Dia.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                                                    </span>
+                                                                                                )}
+                                                                                            </td>
+                                                                                        </tr>
+                                                                                    );
+                                                                                })}
                                                                             </tbody>
                                                                         </table>
                                                                     </div>
