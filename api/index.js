@@ -509,7 +509,6 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
         const { rows: internalRows } = await executeQuery(dbConfig, 'SELECT * FROM Colaboradores');
 
         // 4.1 Carregar Lista de Grupos Válidos (Para prevenir criação de lixo)
-        // Adiciona grupos que JÁ EXISTEM no banco + Vendedor/Promotor (Padrões do sistema)
         const validGroups = new Set(['vendedor', 'promotor']);
         internalRows.forEach(r => {
              if (r.Grupo) validGroups.add(r.Grupo.toLowerCase());
@@ -518,6 +517,7 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
         // 5. Comparar (Diff Logic)
         const novos = [];
         const alterados = [];
+        const conflitos = []; // v1.8: Lista de conflitos de Setor (Troca de Aparelho)
         
         for (const ext of externalRows) {
             // Case insensitive keys from external
@@ -530,12 +530,8 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
             let grupo = 'Outros'; 
 
             if (grupoRaw && validGroups.has(grupoRaw.toLowerCase())) {
-                // Se o grupo do banco externo é válido (existe no sistema ou é padrão), usamos ele.
-                // Mantém a grafia original do banco externo.
                 grupo = grupoRaw; 
             } else {
-                // Se o grupo é desconhecido (ex: "Supervisor", "Motorista") e não existe no sistema,
-                // forçamos para "Outros" para evitar poluição das abas.
                 grupo = 'Outros';
             }
 
@@ -545,23 +541,43 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
             const newData = { id_pulsus, nome, codigo_setor, grupo };
 
             if (!interno) {
-                // Novo registro
-                novos.push({ id_pulsus, nome, changes: [], newData });
+                // Registro Novo (ID Pulsus nao existe no sistema)
+                // NOVO v1.8: Verificar se JÁ EXISTE alguém neste SETOR e GRUPO
+                // Se existir, pode ser uma troca de aparelho (ID Pulsus mudou, mas setor é o mesmo)
+                
+                const existingInSector = internalRows.find(i => 
+                    i.CodigoSetor === codigo_setor && 
+                    i.Grupo.toLowerCase() === grupo.toLowerCase()
+                );
+
+                if (existingInSector) {
+                    // CONFLITO DETECTADO: Mesmo setor, IDs diferentes.
+                    conflitos.push({
+                        id_pulsus,
+                        nome,
+                        changes: [],
+                        newData,
+                        matchType: 'SECTOR_MATCH',
+                        existingColab: {
+                            ID_Colaborador: existingInSector.ID_Colaborador,
+                            ID_Pulsus: existingInSector.ID_Pulsus,
+                            Nome: existingInSector.Nome
+                        }
+                    });
+                } else {
+                    // Novo Colaborador de fato
+                    novos.push({ id_pulsus, nome, changes: [], newData, matchType: 'NEW' });
+                }
+
             } else {
-                // Checar diferenças
-                // REGRA DE PRESERVAÇÃO: Não verificamos grupo em usuários existentes. 
-                // Apenas Nome e Setor são atualizados pelo DB externo.
+                // Colaborador já existe (ID Match)
                 const changes = [];
                 if (interno.Nome.trim() !== nome) changes.push({ field: 'Nome', oldValue: interno.Nome, newValue: nome });
                 if (interno.CodigoSetor !== codigo_setor) changes.push({ field: 'CodigoSetor', oldValue: interno.CodigoSetor, newValue: codigo_setor });
                 
-                // Ignorar diff de grupo para existentes
-
                 if (changes.length > 0) {
-                    // Mantemos o grupo original no newData para não sobrescrever visualmente no preview,
-                    // mas a lógica de sync não vai usar esse campo para update.
-                    newData.grupo = interno.Grupo; 
-                    alterados.push({ id_pulsus, nome, changes, newData });
+                    newData.grupo = interno.Grupo; // Preservar grupo existente
+                    alterados.push({ id_pulsus, nome, changes, newData, matchType: 'ID_MATCH' });
                 }
             }
         }
@@ -569,6 +585,7 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
         res.json({
             novos,
             alterados,
+            conflitos,
             totalExternal: externalRows.length
         });
 
@@ -582,7 +599,7 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
 
 // 4. SYNC (Apply Changes)
 app.post('/integracao/sync', authenticateToken, async (req, res) => {
-    const { items } = req.body; // Array de DiffItems
+    const { items } = req.body; // Array de DiffItems com syncAction opcional
     const adminUser = req.user.usuario;
 
     if (!items || !Array.isArray(items)) return res.status(400).json({ message: 'Dados inválidos.' });
@@ -591,32 +608,50 @@ app.post('/integracao/sync', authenticateToken, async (req, res) => {
     try {
         for (const item of items) {
             const { id_pulsus, nome, codigo_setor, grupo } = item.newData;
-            
-            // Check Existencia
-            const checkQ = `SELECT ID_Colaborador FROM Colaboradores WHERE ID_Pulsus = @idp`;
-            const { rows: existing } = await executeQuery(dbConfig, checkQ, [{ name: 'idp', type: TYPES.Int, value: id_pulsus }]);
+            const syncAction = item.syncAction || 'DEFAULT';
 
-            if (existing.length > 0) {
-                // Update
-                // REGRA: NÃO ATUALIZAR GRUPO DE USUÁRIO EXISTENTE
-                const updateQ = `UPDATE Colaboradores SET CodigoSetor=@cod, Nome=@nome, DataAlteracao=GETDATE(), MotivoAlteracao='Sincronização DB', UsuarioAlteracao=@user WHERE ID_Pulsus=@idp`;
-                await executeQuery(dbConfig, updateQ, [
+            if (syncAction === 'UPDATE_ID' && item.existingColab) {
+                // Caso especial: Atualizar ID Pulsus do colaborador existente (Troca de aparelho)
+                // "Atualizar ID do Existente"
+                const updateIdQ = `
+                    UPDATE Colaboradores 
+                    SET ID_Pulsus=@newId, CodigoSetor=@cod, Nome=@nome,
+                        DataAlteracao=GETDATE(), MotivoAlteracao='Sincronização: Troca de ID/Aparelho', UsuarioAlteracao=@user 
+                    WHERE ID_Colaborador=@oldInternalId
+                `;
+                await executeQuery(dbConfig, updateIdQ, [
+                    { name: 'newId', type: TYPES.Int, value: id_pulsus },
                     { name: 'cod', type: TYPES.Int, value: codigo_setor },
                     { name: 'nome', type: TYPES.NVarChar, value: nome },
-                    { name: 'idp', type: TYPES.Int, value: id_pulsus },
-                    { name: 'user', type: TYPES.NVarChar, value: adminUser }
+                    { name: 'user', type: TYPES.NVarChar, value: adminUser },
+                    { name: 'oldInternalId', type: TYPES.Int, value: item.existingColab.ID_Colaborador }
                 ]);
+
             } else {
-                // Insert
-                // REGRA: Se grupo vazio (Outros), já vem tratado do preview
-                const insertQ = `INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao) VALUES (@idp, @cod, @nome, @grp, 'Carro', 1, @user)`;
-                await executeQuery(dbConfig, insertQ, [
-                    { name: 'idp', type: TYPES.Int, value: id_pulsus },
-                    { name: 'cod', type: TYPES.Int, value: codigo_setor },
-                    { name: 'nome', type: TYPES.NVarChar, value: nome },
-                    { name: 'grp', type: TYPES.NVarChar, value: grupo },
-                    { name: 'user', type: TYPES.NVarChar, value: adminUser }
-                ]);
+                // Lógica Padrão (Insert ou Update Data)
+                const checkQ = `SELECT ID_Colaborador FROM Colaboradores WHERE ID_Pulsus = @idp`;
+                const { rows: existing } = await executeQuery(dbConfig, checkQ, [{ name: 'idp', type: TYPES.Int, value: id_pulsus }]);
+
+                if (existing.length > 0) {
+                    // Update Dados (Mantendo ID)
+                    const updateQ = `UPDATE Colaboradores SET CodigoSetor=@cod, Nome=@nome, DataAlteracao=GETDATE(), MotivoAlteracao='Sincronização DB', UsuarioAlteracao=@user WHERE ID_Pulsus=@idp`;
+                    await executeQuery(dbConfig, updateQ, [
+                        { name: 'cod', type: TYPES.Int, value: codigo_setor },
+                        { name: 'nome', type: TYPES.NVarChar, value: nome },
+                        { name: 'idp', type: TYPES.Int, value: id_pulsus },
+                        { name: 'user', type: TYPES.NVarChar, value: adminUser }
+                    ]);
+                } else {
+                    // Insert Novo
+                    const insertQ = `INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao) VALUES (@idp, @cod, @nome, @grp, 'Carro', 1, @user)`;
+                    await executeQuery(dbConfig, insertQ, [
+                        { name: 'idp', type: TYPES.Int, value: id_pulsus },
+                        { name: 'cod', type: TYPES.Int, value: codigo_setor },
+                        { name: 'nome', type: TYPES.NVarChar, value: nome },
+                        { name: 'grp', type: TYPES.NVarChar, value: grupo },
+                        { name: 'user', type: TYPES.NVarChar, value: adminUser }
+                    ]);
+                }
             }
             processedCount++;
         }
@@ -626,7 +661,7 @@ app.post('/integracao/sync', authenticateToken, async (req, res) => {
             `INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES (@user, 'SINCRONIZACAO_DB', @detalhes)`, 
             [
                 {name:'user', type:TYPES.NVarChar, value:adminUser},
-                {name:'detalhes', type:TYPES.NVarChar, value:`Sincronizou ${processedCount} colaboradores do banco externo.`}
+                {name:'detalhes', type:TYPES.NVarChar, value:`Sincronizou ${processedCount} registros.`}
             ]
         );
 

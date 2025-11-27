@@ -10,6 +10,8 @@
 
 
 
+
+
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { Colaborador, TipoVeiculoReembolso, DiffItem } from '../types.ts';
@@ -25,8 +27,9 @@ const SyncAuditModal: React.FC<{
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [error, setError] = useState('');
-    const [previewData, setPreviewData] = useState<{novos: DiffItem[], alterados: DiffItem[], total: number} | null>(null);
+    const [previewData, setPreviewData] = useState<{novos: DiffItem[], alterados: DiffItem[], conflitos: DiffItem[], total: number} | null>(null);
     const [selection, setSelection] = useState<Set<number>>(new Set());
+    const [conflictResolutions, setConflictResolutions] = useState<Record<number, 'UPDATE_ID' | 'INSERT'>>({});
 
     React.useEffect(() => {
         if (isOpen) {
@@ -35,6 +38,7 @@ const SyncAuditModal: React.FC<{
             setPreviewData(null);
             setError('');
             setSelection(new Set());
+            setConflictResolutions({});
         }
     }, [isOpen]);
 
@@ -43,12 +47,19 @@ const SyncAuditModal: React.FC<{
         setError('');
         try {
             const data = await getImportPreview();
-            setPreviewData({ novos: data.novos, alterados: data.alterados, total: data.totalExternal });
+            setPreviewData({ 
+                novos: data.novos, 
+                alterados: data.alterados, 
+                conflitos: data.conflitos || [],
+                total: data.totalExternal 
+            });
             
             // Selecionar tudo por padrão
             const allIds = new Set<number>();
             data.novos.forEach(i => allIds.add(i.id_pulsus));
             data.alterados.forEach(i => allIds.add(i.id_pulsus));
+            // Conflitos não selecionados por padrão, usuário deve decidir
+            
             setSelection(allIds);
 
         } catch (err: any) {
@@ -65,15 +76,40 @@ const SyncAuditModal: React.FC<{
         setSelection(newSel);
     };
 
+    // Define ação para conflitos
+    const setConflictAction = (id: number, action: 'UPDATE_ID' | 'INSERT') => {
+        setConflictResolutions(prev => ({...prev, [id]: action}));
+        // Auto-selecionar ao decidir
+        const newSel = new Set(selection);
+        newSel.add(id);
+        setSelection(newSel);
+    };
+
     const handleSync = async () => {
         if (!previewData) return;
         setSyncing(true);
         try {
-            const itemsToSync = [
-                ...previewData.novos.filter(i => selection.has(i.id_pulsus)),
-                ...previewData.alterados.filter(i => selection.has(i.id_pulsus))
-            ];
+            const itemsToSync: DiffItem[] = [];
+
+            // Novos e Alterados (Simples)
+            [...previewData.novos, ...previewData.alterados].forEach(item => {
+                if (selection.has(item.id_pulsus)) {
+                    itemsToSync.push({ ...item, syncAction: item.matchType === 'ID_MATCH' ? 'UPDATE_DATA' : 'INSERT' });
+                }
+            });
+
+            // Conflitos (Com Ação Decidida)
+            previewData.conflitos.forEach(item => {
+                if (selection.has(item.id_pulsus)) {
+                    const action = conflictResolutions[item.id_pulsus];
+                    if (action) {
+                        itemsToSync.push({ ...item, syncAction: action });
+                    }
+                }
+            });
             
+            if (itemsToSync.length === 0) return;
+
             await syncColaboradores(itemsToSync);
             onSuccess();
             onClose();
@@ -88,7 +124,7 @@ const SyncAuditModal: React.FC<{
 
     return (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-8 w-full max-w-5xl max-h-[90vh] flex flex-col">
                 <div className="flex justify-between items-center mb-6 shrink-0">
                     <div>
                         <h3 className="text-xl font-bold text-slate-800 flex items-center"><UploadIcon className="w-6 h-6 mr-2 text-blue-600"/> Sincronização de Dados</h3>
@@ -114,8 +150,8 @@ const SyncAuditModal: React.FC<{
                     )}
 
                     {!loading && !error && previewData && (
-                        <div className="space-y-6">
-                            {previewData.novos.length === 0 && previewData.alterados.length === 0 && (
+                        <div className="space-y-8">
+                            {previewData.novos.length === 0 && previewData.alterados.length === 0 && previewData.conflitos.length === 0 && (
                                 <div className="text-center py-10">
                                     <CheckCircleIcon className="w-12 h-12 text-emerald-500 mx-auto mb-3"/>
                                     <h4 className="text-lg font-bold text-slate-700">Tudo Sincronizado!</h4>
@@ -123,13 +159,69 @@ const SyncAuditModal: React.FC<{
                                 </div>
                             )}
 
+                            {/* --- CONFLITOS (Troca de ID) --- */}
+                            {previewData.conflitos.length > 0 && (
+                                <div>
+                                    <h4 className="text-sm font-bold text-yellow-600 uppercase tracking-wider mb-2 flex items-center bg-yellow-50 border border-yellow-200 p-2 rounded">
+                                        <ExclamationIcon className="w-4 h-4 mr-2"/>
+                                        <span className="bg-yellow-200 text-yellow-800 px-2 py-0.5 rounded-full mr-2">{previewData.conflitos.length}</span>
+                                        Possíveis Trocas de ID / Aparelho
+                                    </h4>
+                                    <p className="text-xs text-slate-500 mb-3 px-1">
+                                        O arquivo traz um ID Novo, mas já existe alguém cadastrado neste <b>Setor</b>. Pode ser uma troca de aparelho.
+                                    </p>
+                                    <div className="space-y-3">
+                                        {previewData.conflitos.map(item => (
+                                            <div key={item.id_pulsus} className="bg-white border border-yellow-200 rounded-lg p-4 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center text-sm mb-1">
+                                                        <span className="font-bold text-slate-700 w-24">Importado:</span>
+                                                        <span className="font-mono text-slate-600 bg-slate-100 px-1 rounded">{item.id_pulsus}</span>
+                                                        <span className="mx-2">-</span>
+                                                        <span>{item.nome}</span>
+                                                    </div>
+                                                    <div className="flex items-center text-sm">
+                                                        <span className="font-bold text-slate-700 w-24">Existente:</span>
+                                                        <span className="font-mono text-slate-600 bg-slate-100 px-1 rounded">{item.existingColab?.ID_Pulsus}</span>
+                                                        <span className="mx-2">-</span>
+                                                        <span>{item.existingColab?.Nome}</span>
+                                                        <span className="ml-2 text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded">Setor {item.newData.codigo_setor}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    <button 
+                                                        onClick={() => setConflictAction(item.id_pulsus, 'UPDATE_ID')}
+                                                        className={`px-3 py-2 text-xs font-bold rounded-lg border transition ${
+                                                            conflictResolutions[item.id_pulsus] === 'UPDATE_ID' 
+                                                            ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+                                                            : 'bg-white text-slate-600 border-slate-300 hover:bg-blue-50'
+                                                        }`}
+                                                    >
+                                                        Atualizar ID do Existente
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => setConflictAction(item.id_pulsus, 'INSERT')}
+                                                        className={`px-3 py-2 text-xs font-bold rounded-lg border transition ${
+                                                            conflictResolutions[item.id_pulsus] === 'INSERT' 
+                                                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-md' 
+                                                            : 'bg-white text-slate-600 border-slate-300 hover:bg-emerald-50'
+                                                        }`}
+                                                    >
+                                                        Criar Novo
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {previewData.novos.length > 0 && (
                                 <div>
                                     <h4 className="text-sm font-bold text-emerald-600 uppercase tracking-wider mb-2 flex items-center">
                                         <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full mr-2">{previewData.novos.length}</span>
-                                        Novos Colaboradores
+                                        Novos Colaboradores (Sem Conflitos)
                                     </h4>
-                                    <p className="text-[10px] text-emerald-600/70 mb-2">Se o grupo não existir no banco externo, será criado como <b>"Outros"</b>.</p>
                                     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                                         <table className="w-full text-xs text-left">
                                             <thead className="bg-emerald-50 text-emerald-700 font-semibold border-b border-emerald-100">
@@ -168,13 +260,9 @@ const SyncAuditModal: React.FC<{
                                     <div className="flex justify-between items-center mb-2">
                                         <h4 className="text-sm font-bold text-amber-600 uppercase tracking-wider flex items-center">
                                             <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full mr-2">{previewData.alterados.length}</span>
-                                            Alterações de Cadastro (Conflitos)
+                                            Alterações de Cadastro (Mesmo ID)
                                         </h4>
                                     </div>
-                                    <p className="text-[10px] text-amber-600/70 mb-2 font-bold bg-amber-50 p-2 rounded border border-amber-100">
-                                        <ExclamationIcon className="w-3 h-3 inline mr-1"/>
-                                        O grupo definido no sistema será mantido. A sincronização atualiza apenas Nome e Setor de usuários existentes.
-                                    </p>
                                     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                                         <table className="w-full text-xs text-left">
                                             <thead className="bg-amber-50 text-amber-700 font-semibold border-b border-amber-100">
@@ -222,7 +310,7 @@ const SyncAuditModal: React.FC<{
                 <div className="mt-6 flex justify-between items-center shrink-0">
                     <div className="text-sm text-slate-500">
                         {previewData ? (
-                            <span>{selection.size} itens selecionados de {previewData.novos.length + previewData.alterados.length} encontrados.</span>
+                            <span>{selection.size} itens selecionados de {previewData.novos.length + previewData.alterados.length + previewData.conflitos.length} encontrados.</span>
                         ) : <span>Aguardando análise...</span>}
                     </div>
                     <div className="flex space-x-3">

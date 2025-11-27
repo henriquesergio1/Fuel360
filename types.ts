@@ -71,12 +71,21 @@ export interface DiffItem {
         nome: string;
         codigo_setor: number;
         grupo: string;
-    }
+    };
+    // Novo v1.8: Suporte a conflitos
+    matchType?: 'ID_MATCH' | 'SECTOR_MATCH' | 'NEW';
+    existingColab?: {
+        ID_Colaborador: number;
+        ID_Pulsus: number;
+        Nome: string;
+    };
+    syncAction?: 'INSERT' | 'UPDATE_DATA' | 'UPDATE_ID'; // Controle de ação no frontend
 }
 
 export interface ImportPreviewResult {
     novos: DiffItem[];
     alterados: DiffItem[];
+    conflitos: DiffItem[]; // Novo v1.8
     totalExternal: number;
 }
 

@@ -1,13 +1,3 @@
-
-
-
-
-
-
-
-
-
-
 import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia, IntegrationConfig, ImportPreviewResult, DiffItem } from '../types.ts';
 import * as mockApi from '../api/mockData.ts';
 
@@ -173,7 +163,7 @@ const MockService = {
     // Mock Import
     getIntegrationConfig: async () => ({ extDb_Host: '127.0.0.1', extDb_Port: 3306, extDb_User: 'root', extDb_Database: 'mock_db', extDb_Query: 'SELECT ...' }),
     updateIntegrationConfig: async () => {},
-    getImportPreview: async () => {
+    getImportPreview: async (): Promise<ImportPreviewResult> => {
         await new Promise(r => setTimeout(r, 1500));
         return { 
             novos: [
@@ -181,7 +171,8 @@ const MockService = {
             ], 
             alterados: [
                 { id_pulsus: 550, nome: 'João da Silva', changes: [{ field: 'CodigoSetor', oldValue: 101, newValue: 105 }], newData: { id_pulsus: 550, nome: 'João da Silva', codigo_setor: 105, grupo: 'Vendedor' } }
-            ], 
+            ],
+            conflitos: [],
             totalExternal: 20 
         };
     },
