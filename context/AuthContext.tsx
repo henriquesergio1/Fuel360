@@ -1,4 +1,5 @@
 
+
 import React, { createContext, useState, useEffect, ReactNode, useContext } from 'react';
 import { Usuario } from '../types.ts';
 import * as api from '../services/apiService.ts';
@@ -18,6 +19,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        // Inicialização do usuário
         const savedUser = localStorage.getItem('AUTH_USER');
         const token = localStorage.getItem('AUTH_TOKEN');
         
@@ -30,6 +32,14 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
             }
         }
         setLoading(false);
+
+        // Listener para expiração de sessão sem reload da página
+        const handleUnauthorized = () => {
+            logout();
+        };
+
+        window.addEventListener('FUEL360_UNAUTHORIZED', handleUnauthorized);
+        return () => window.removeEventListener('FUEL360_UNAUTHORIZED', handleUnauthorized);
     }, []);
 
     const login = async (usuario: string, senha: string) => {

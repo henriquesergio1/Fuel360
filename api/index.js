@@ -383,7 +383,14 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
 
         // 4. Carregar Dados Internos
         const { rows: internalRows } = await executeQuery(dbConfig, 'SELECT * FROM Colaboradores');
-        
+
+        // 4.1 Carregar Lista de Grupos Válidos (Para prevenir criação de lixo)
+        // Adiciona grupos que JÁ EXISTEM no banco + Vendedor/Promotor (Padrões do sistema)
+        const validGroups = new Set(['vendedor', 'promotor']);
+        internalRows.forEach(r => {
+             if (r.Grupo) validGroups.add(r.Grupo.toLowerCase());
+        });
+
         // 5. Comparar (Diff Logic)
         const novos = [];
         const alterados = [];
@@ -394,9 +401,19 @@ app.post('/integracao/preview', authenticateToken, async (req, res) => {
             const nome = (ext.nome || ext.NOME || '').trim();
             const codigo_setor = Number(ext.codigo_setor || ext.CODIGO_SETOR || 0);
             
-            // Regra: Se grupo externo vazio, assume "Outros"
+            // Lógica de Validação de Grupo
             let grupoRaw = (ext.grupo || ext.GRUPO || '').trim();
-            const grupo = grupoRaw === '' ? 'Outros' : grupoRaw;
+            let grupo = 'Outros'; 
+
+            if (grupoRaw && validGroups.has(grupoRaw.toLowerCase())) {
+                // Se o grupo do banco externo é válido (existe no sistema ou é padrão), usamos ele.
+                // Mantém a grafia original do banco externo.
+                grupo = grupoRaw; 
+            } else {
+                // Se o grupo é desconhecido (ex: "Supervisor", "Motorista") e não existe no sistema,
+                // forçamos para "Outros" para evitar poluição das abas.
+                grupo = 'Outros';
+            }
 
             if (!id_pulsus || !nome) continue;
 

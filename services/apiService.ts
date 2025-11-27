@@ -34,9 +34,11 @@ const getToken = () => localStorage.getItem('AUTH_TOKEN');
 const handleResponse = async (response: Response, isLoginRequest: boolean = false) => {
     if (response.status === 401 || response.status === 403) {
         if (isLoginRequest) throw new Error('Falha na autenticação.');
-        localStorage.removeItem('AUTH_TOKEN');
-        localStorage.removeItem('AUTH_USER');
-        window.location.reload();
+        
+        // CORREÇÃO MOBILE: Removemos o reload() forçado que causava loop infinito.
+        // Disparamos um evento para o AuthContext limpar o estado graciosamente.
+        window.dispatchEvent(new CustomEvent('FUEL360_UNAUTHORIZED'));
+        
         throw new Error('Sessão expirada.');
     }
     if (response.status === 402) {

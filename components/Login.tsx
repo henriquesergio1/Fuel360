@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { SpinnerIcon, FuelLogo, ExclamationIcon, TruckIcon } from './icons.tsx';
@@ -30,7 +31,7 @@ export const Login: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen bg-slate-100 flex items-center justify-center px-4 relative overflow-hidden">
+        <div className="min-h-screen supports-[min-h-100dvh]:min-h-[100dvh] bg-slate-100 flex items-center justify-center px-4 relative overflow-hidden">
             {/* Blue Glow Effects - Subtle Corporate */}
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0 pointer-events-none">
                  <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-100/40 rounded-full blur-[100px]"></div>
@@ -97,7 +98,7 @@ export const Login: React.FC = () => {
                 </form>
                 
                 <div className="mt-8 text-center pt-4 border-t border-slate-100">
-                    <p className="text-xs text-slate-400 font-mono">v1.3.1 | Todos os direitos reservados</p>
+                    <p className="text-xs text-slate-400 font-mono">v1.4.6 | Todos os direitos reservados</p>
                 </div>
             </div>
         </div>
