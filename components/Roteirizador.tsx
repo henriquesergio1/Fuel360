@@ -1,10 +1,10 @@
 
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { getVisitasPrevistas } from '../services/apiService.ts';
 import { VisitaPrevista, RotaCalculada } from '../types.ts';
-import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, CalendarIcon, UsersIcon, ChevronRightIcon, ChevronDownIcon, XCircleIcon, ArrowLeftIcon, CogIcon, CarIcon, TruckIcon } from './icons.tsx';
+import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, CalendarIcon, UsersIcon, ChevronRightIcon, ChevronDownIcon, XCircleIcon, ArrowLeftIcon, CogIcon, CarIcon, TruckIcon, UserGroupIcon, UserIcon } from './icons.tsx';
 import L from 'leaflet';
 
 // Fix Leaflet Icons
@@ -51,107 +51,149 @@ interface DayRouteSummary {
 interface SellerSummary {
     id: number;
     name: string;
+    supervisorId: number;
     supervisor: string;
     totalKm: number;
     days: DayRouteSummary[];
 }
 
 export const Roteirizador: React.FC = () => {
-    // State
+    // State Inputs
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0]);
     const [tortuosityFactor, setTortuosityFactor] = useState(1.3); // Padrão Urbano
     
+    // Filters State
+    const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
+    const [selectedVendedor, setSelectedVendedor] = useState<string>('');
+
+    // Data State
     const [loading, setLoading] = useState(false);
-    const [reportData, setReportData] = useState<SellerSummary[]>([]);
-    const [expandedSellers, setExpandedSellers] = useState<Set<number>>(new Set());
+    const [rawData, setRawData] = useState<VisitaPrevista[]>([]);
     
-    // Map View State
+    // UI State
+    const [expandedSellers, setExpandedSellers] = useState<Set<number>>(new Set());
     const [viewingRoute, setViewingRoute] = useState<DayRouteSummary | null>(null);
 
+    // Fetch Data
     const handleCalculate = async () => {
         setLoading(true);
-        setReportData([]);
+        setRawData([]);
         setViewingRoute(null);
+        setExpandedSellers(new Set());
         
         try {
-            const rawData = await getVisitasPrevistas(startDate, endDate);
-            
-            // 1. Group by Seller
-            const sellerMap = new Map<number, VisitaPrevista[]>();
-            rawData.forEach(v => {
-                if (!sellerMap.has(v.Cod_Vend)) sellerMap.set(v.Cod_Vend, []);
-                sellerMap.get(v.Cod_Vend)?.push(v);
-            });
-
-            const summaries: SellerSummary[] = [];
-
-            // 2. Process each seller
-            for (const [sellerId, visits] of sellerMap.entries()) {
-                const daysMap = new Map<string, VisitaPrevista[]>();
-                
-                // Group by Date (YYYY-MM-DD)
-                visits.forEach(v => {
-                    if (!v.Data_da_Visita) return;
-                    try {
-                        const d = new Date(v.Data_da_Visita);
-                        if (isNaN(d.getTime())) return;
-                        const dateKey = d.toISOString().split('T')[0];
-                        
-                        if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
-                        daysMap.get(dateKey)?.push(v);
-                    } catch (e) {
-                        console.warn('Data inválida ignorada', v);
-                    }
-                });
-
-                const daysSummary: DayRouteSummary[] = [];
-                let totalSellerKm = 0;
-
-                for (const [dateKey, dayVisits] of daysMap.entries()) {
-                    // Filter valid coordinates
-                    const validPoints = dayVisits.filter(v => v.Lat && v.Long && v.Lat !== 0 && v.Long !== 0);
-                    
-                    let kmReta = 0;
-                    // Calculate distance point-to-point in order of array (Assuming query order is logical)
-                    for (let i = 0; i < validPoints.length - 1; i++) {
-                        kmReta += calcDistance(validPoints[i].Lat, validPoints[i].Long, validPoints[i+1].Lat, validPoints[i+1].Long);
-                    }
-
-                    const kmEstimado = kmReta * tortuosityFactor;
-                    totalSellerKm += kmEstimado;
-
-                    daysSummary.push({
-                        date: dateKey,
-                        dayName: dayVisits[0]?.Dia_Semana || '',
-                        kmReta,
-                        kmEstimado,
-                        visitas: validPoints
-                    });
-                }
-
-                // Sort days chronologically
-                daysSummary.sort((a, b) => a.date.localeCompare(b.date));
-
-                summaries.push({
-                    id: sellerId,
-                    name: visits[0]?.Nome_Vendedor || 'Desconhecido',
-                    supervisor: visits[0]?.Nome_Supervisor || '-',
-                    totalKm: totalSellerKm,
-                    days: daysSummary
-                });
-            }
-
-            // Sort sellers by name
-            summaries.sort((a, b) => a.name.localeCompare(b.name));
-            setReportData(summaries);
-
+            const data = await getVisitasPrevistas(startDate, endDate);
+            setRawData(data);
         } catch (e: any) {
             alert("Erro ao calcular: " + e.message);
         } finally {
             setLoading(false);
         }
     };
+
+    // Derived Lists for Dropdowns
+    const availableSupervisors = useMemo(() => {
+        const unique = new Map<number, string>();
+        rawData.forEach(v => {
+            if (v.Cod_Supervisor && v.Nome_Supervisor) {
+                unique.set(v.Cod_Supervisor, v.Nome_Supervisor);
+            }
+        });
+        return Array.from(unique.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    }, [rawData]);
+
+    const availableVendedores = useMemo(() => {
+        const unique = new Map<number, string>();
+        rawData.forEach(v => {
+            // Se tiver filtro de supervisor, mostrar apenas vendedores daquele supervisor
+            if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return;
+            
+            if (v.Cod_Vend && v.Nome_Vendedor) {
+                unique.set(v.Cod_Vend, v.Nome_Vendedor);
+            }
+        });
+        return Array.from(unique.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    }, [rawData, selectedSupervisor]);
+
+    // Reset Vendor filter if Supervisor changes
+    useEffect(() => {
+        setSelectedVendedor('');
+    }, [selectedSupervisor]);
+
+    // Process Data (Filter & Group)
+    const reportData = useMemo(() => {
+        if (rawData.length === 0) return [];
+
+        // 1. Filter Raw Data
+        const filtered = rawData.filter(v => {
+            if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return false;
+            if (selectedVendedor && String(v.Cod_Vend) !== selectedVendedor) return false;
+            return true;
+        });
+
+        // 2. Group by Seller
+        const sellerMap = new Map<number, VisitaPrevista[]>();
+        filtered.forEach(v => {
+            if (!sellerMap.has(v.Cod_Vend)) sellerMap.set(v.Cod_Vend, []);
+            sellerMap.get(v.Cod_Vend)?.push(v);
+        });
+
+        const summaries: SellerSummary[] = [];
+
+        // 3. Process Grouped Data
+        for (const [sellerId, visits] of sellerMap.entries()) {
+            const daysMap = new Map<string, VisitaPrevista[]>();
+            
+            // Group by Date
+            visits.forEach(v => {
+                if (!v.Data_da_Visita) return;
+                try {
+                    const d = new Date(v.Data_da_Visita);
+                    if (isNaN(d.getTime())) return;
+                    const dateKey = d.toISOString().split('T')[0];
+                    if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
+                    daysMap.get(dateKey)?.push(v);
+                } catch (e) {}
+            });
+
+            const daysSummary: DayRouteSummary[] = [];
+            let totalSellerKm = 0;
+
+            for (const [dateKey, dayVisits] of daysMap.entries()) {
+                const validPoints = dayVisits.filter(v => v.Lat && v.Long && v.Lat !== 0 && v.Long !== 0);
+                
+                let kmReta = 0;
+                for (let i = 0; i < validPoints.length - 1; i++) {
+                    kmReta += calcDistance(validPoints[i].Lat, validPoints[i].Long, validPoints[i+1].Lat, validPoints[i+1].Long);
+                }
+
+                const kmEstimado = kmReta * tortuosityFactor;
+                totalSellerKm += kmEstimado;
+
+                daysSummary.push({
+                    date: dateKey,
+                    dayName: dayVisits[0]?.Dia_Semana || '',
+                    kmReta,
+                    kmEstimado,
+                    visitas: validPoints
+                });
+            }
+
+            daysSummary.sort((a, b) => a.date.localeCompare(b.date));
+
+            summaries.push({
+                id: sellerId,
+                name: visits[0]?.Nome_Vendedor || 'Desconhecido',
+                supervisorId: visits[0]?.Cod_Supervisor || 0,
+                supervisor: visits[0]?.Nome_Supervisor || '-',
+                totalKm: totalSellerKm,
+                days: daysSummary
+            });
+        }
+
+        return summaries.sort((a, b) => a.name.localeCompare(b.name));
+    }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor]);
 
     const toggleExpand = (id: number) => {
         const newSet = new Set(expandedSellers);
@@ -165,7 +207,7 @@ export const Roteirizador: React.FC = () => {
     // View: Map Modal
     if (viewingRoute) {
         return (
-            <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
+            <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative animate-fade-in">
                 <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 z-10">
                     <button 
                         onClick={() => setViewingRoute(null)}
@@ -177,7 +219,7 @@ export const Roteirizador: React.FC = () => {
                         <h3 className="font-bold text-slate-800">{new Date(viewingRoute.date).toLocaleDateString('pt-BR')} - {viewingRoute.dayName}</h3>
                         <p className="text-xs text-slate-500">{viewingRoute.visitas.length} Pontos de Visita • {viewingRoute.kmEstimado.toFixed(1)} km est.</p>
                     </div>
-                    <div className="w-20"></div> {/* Spacer for center alignment */}
+                    <div className="w-20"></div>
                 </div>
                 
                 <div className="flex-1 relative z-0">
@@ -220,9 +262,10 @@ export const Roteirizador: React.FC = () => {
                 </div>
             </div>
 
-            {/* Filter Bar */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex flex-wrap gap-6 items-end">
+            {/* Config & Filter Bar */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                {/* Linha 1: Parâmetros de Cálculo */}
+                <div className="flex flex-wrap gap-4 items-end pb-4 border-b border-slate-100">
                     <div className="flex gap-4">
                         <div className="w-36">
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data Início</label>
@@ -235,29 +278,11 @@ export const Roteirizador: React.FC = () => {
                     </div>
 
                     <div className="flex flex-col">
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1" title="Adiciona uma margem sobre a linha reta para compensar curvas">Fator Tortuosidade</label>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1" title="Fator de ajuste de curvatura">Fator Tortuosidade</label>
                         <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg p-1">
-                            <button 
-                                onClick={() => setTortuosityFactor(1.1)}
-                                className={`px-3 py-1.5 rounded text-xs font-bold transition ${tortuosityFactor === 1.1 ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                title="Rodovias / Estradas Retas (+10%)"
-                            >
-                                Rodovia
-                            </button>
-                            <button 
-                                onClick={() => setTortuosityFactor(1.3)}
-                                className={`px-3 py-1.5 rounded text-xs font-bold transition ${tortuosityFactor === 1.3 ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                                title="Cidades e Trânsito Normal (+30%)"
-                            >
-                                Urbano
-                            </button>
-                            <input 
-                                type="number" 
-                                step="0.1" 
-                                value={tortuosityFactor} 
-                                onChange={e => setTortuosityFactor(parseFloat(e.target.value))} 
-                                className="w-16 bg-transparent text-center text-sm font-mono font-bold outline-none border-l border-slate-200 ml-1 pl-1"
-                            />
+                            <button onClick={() => setTortuosityFactor(1.1)} className={`px-3 py-1.5 rounded text-xs font-bold transition ${tortuosityFactor === 1.1 ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Rodovia</button>
+                            <button onClick={() => setTortuosityFactor(1.3)} className={`px-3 py-1.5 rounded text-xs font-bold transition ${tortuosityFactor === 1.3 ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Urbano</button>
+                            <input type="number" step="0.1" value={tortuosityFactor} onChange={e => setTortuosityFactor(parseFloat(e.target.value))} className="w-14 bg-transparent text-center text-sm font-mono font-bold outline-none border-l border-slate-200 ml-1"/>
                         </div>
                     </div>
 
@@ -270,10 +295,49 @@ export const Roteirizador: React.FC = () => {
                         Calcular Previsão
                     </button>
                 </div>
+
+                {/* Linha 2: Filtros de Resultado (Só aparece após busca) */}
+                <div className={`flex flex-wrap gap-4 items-center transition-opacity duration-300 ${rawData.length > 0 ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
+                    <div className="w-64">
+                         <label className="block text-xs font-bold text-slate-400 uppercase mb-1 flex items-center"><UserGroupIcon className="w-3 h-3 mr-1"/> Filtrar Supervisor</label>
+                         <select 
+                            value={selectedSupervisor} 
+                            onChange={e => setSelectedSupervisor(e.target.value)} 
+                            disabled={rawData.length === 0}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">Todos os Supervisores</option>
+                            {availableSupervisors.map(([id, name]) => (
+                                <option key={id} value={id}>{id} - {name}</option>
+                            ))}
+                         </select>
+                    </div>
+
+                    <div className="w-64">
+                         <label className="block text-xs font-bold text-slate-400 uppercase mb-1 flex items-center"><UserIcon className="w-3 h-3 mr-1"/> Filtrar Vendedor</label>
+                         <select 
+                            value={selectedVendedor} 
+                            onChange={e => setSelectedVendedor(e.target.value)} 
+                            disabled={rawData.length === 0}
+                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="">Todos os Vendedores</option>
+                            {availableVendedores.map(([id, name]) => (
+                                <option key={id} value={id}>{id} - {name}</option>
+                            ))}
+                         </select>
+                    </div>
+
+                    {rawData.length > 0 && (
+                        <div className="ml-auto text-xs text-slate-400 font-mono">
+                            Exibindo {reportData.length} de {new Set(rawData.map(r => r.Cod_Vend)).size} vendedores
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Results Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-fade-in-up">
                 <table className="w-full text-sm text-left text-slate-600">
                     <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs border-b border-slate-200">
                         <tr>
@@ -286,7 +350,9 @@ export const Roteirizador: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {reportData.length === 0 ? (
-                            <tr><td colSpan={5} className="p-12 text-center text-slate-400">Nenhuma rota calculada. Selecione o período e clique em Calcular.</td></tr>
+                            <tr><td colSpan={5} className="p-12 text-center text-slate-400">
+                                {rawData.length > 0 ? "Nenhum resultado para os filtros selecionados." : "Nenhuma rota calculada. Selecione o período e clique em Calcular."}
+                            </td></tr>
                         ) : (
                             reportData.map(seller => {
                                 const isExpanded = expandedSellers.has(seller.id);
@@ -296,8 +362,12 @@ export const Roteirizador: React.FC = () => {
                                             <td className="p-4 text-center">
                                                 {isExpanded ? <ChevronDownIcon className="w-4 h-4 text-blue-500"/> : <ChevronRightIcon className="w-4 h-4 text-slate-400"/>}
                                             </td>
-                                            <td className="p-4 font-bold text-slate-800">{seller.name}</td>
-                                            <td className="p-4 text-slate-500">{seller.supervisor}</td>
+                                            <td className="p-4">
+                                                <div className="font-bold text-slate-800">{seller.id} - {seller.name}</div>
+                                            </td>
+                                            <td className="p-4">
+                                                <div className="text-slate-600">{seller.supervisorId} - {seller.supervisor}</div>
+                                            </td>
                                             <td className="p-4 text-center font-mono">{seller.days.length}</td>
                                             <td className="p-4 text-right font-bold text-blue-600 text-lg">{seller.totalKm.toFixed(1)} km</td>
                                         </tr>

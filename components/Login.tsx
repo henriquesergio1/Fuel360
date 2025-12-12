@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext.tsx';
 import { SpinnerIcon, FuelLogo, ExclamationIcon, TruckIcon } from './icons.tsx';
@@ -98,7 +99,7 @@ export const Login: React.FC = () => {
                 </form>
                 
                 <div className="mt-8 text-center pt-4 border-t border-slate-100">
-                    <p className="text-xs text-slate-400 font-mono">v1.4.6 | Todos os direitos reservados</p>
+                    <p className="text-xs text-slate-400 font-mono">v1.4.7 | Todos os direitos reservados</p>
                 </div>
             </div>
         </div>

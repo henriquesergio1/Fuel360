@@ -1,6 +1,6 @@
 {
   "name": "fuel360-frontend",
-  "version": "1.4.5",
+  "version": "1.4.7",
   "private": true,
   "scripts": {
     "dev": "esbuild index.tsx --bundle --outfile=dist/bundle.js --loader:.tsx=tsx --loader:.ts=ts --serve --servedir=.",

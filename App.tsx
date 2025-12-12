@@ -1,4 +1,5 @@
 
+
 import React, { useState, useContext, useEffect } from 'react';
 import { Importacao } from './components/Importacao.tsx';
 import { Configuracao } from './components/Configuracao.tsx';
@@ -123,7 +124,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, setView, isCollapsed, set
                 </div>
                 {!isCollapsed && (
                     <div className="mt-4 text-[10px] text-center text-slate-300 font-mono">
-                        v1.4.6
+                        v1.4.7
                     </div>
                 )}
             </div>
