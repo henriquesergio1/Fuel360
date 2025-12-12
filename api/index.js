@@ -263,7 +263,7 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
         const config = rows[0];
 
         if (!config || !config.ExtDb_Host) {
-            return res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
+            throw new Error("Configuração de banco externo incompleta. Verifique o menu Admin > Integração.");
         }
 
         const conn = await mariadb.createConnection({
@@ -275,8 +275,16 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             connectTimeout: 5000
         });
 
-        const externalRows = await conn.query(config.ExtDb_Query);
-        conn.end();
+        let externalRows = [];
+        try {
+            externalRows = await conn.query(config.ExtDb_Query);
+        } finally {
+            if (conn) conn.end();
+        }
+
+        if (!Array.isArray(externalRows)) {
+            throw new Error("A query não retornou uma lista válida.");
+        }
 
         const { rows: localRows } = await executeQuery(dbConfig, "SELECT * FROM Colaboradores WHERE Ativo = 1");
 
@@ -285,27 +293,44 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
         const conflitos = [];
 
         externalRows.forEach(ext => {
-            const local = localRows.find(l => l.ID_Pulsus == ext.id_pulsus);
+            // Tenta mapear colunas independentemente de case ou alias
+            // Procura chaves que pareçam com id_pulsus, nome, etc.
+            const getId = (obj) => obj.id_pulsus || obj.ID_PULSUS || obj.id || obj.ID;
+            const getName = (obj) => obj.nome || obj.NOME || obj.name || obj.NAME;
+            const getSector = (obj) => obj.codigo_setor || obj.CODIGO_SETOR || obj.setor || obj.SETOR;
+            const getGroup = (obj) => obj.grupo || obj.GRUPO || obj.cargo || obj.CARGO;
+
+            const extId = getId(ext);
+            const extName = getName(ext);
+            const extSector = getSector(ext);
+            const extGroup = getGroup(ext);
+
+            if (!extId || !extName) return; // Ignora linhas inválidas
+
+            const local = localRows.find(l => l.ID_Pulsus == extId);
             
             if (!local) {
                 novos.push({
-                    id_pulsus: ext.id_pulsus,
-                    nome: ext.nome,
+                    id_pulsus: extId,
+                    nome: extName,
                     matchType: 'NEW',
-                    newData: { codigo_setor: ext.codigo_setor, grupo: ext.grupo }
+                    newData: { codigo_setor: extSector || 0, grupo: extGroup || 'Vendedor' }
                 });
             } else {
                 const changes = [];
-                if (String(local.CodigoSetor) !== String(ext.codigo_setor)) changes.push({ field: 'Setor', oldValue: local.CodigoSetor, newValue: ext.codigo_setor });
+                // Compara apenas se o valor externo existir
+                if (extSector && String(local.CodigoSetor) !== String(extSector)) {
+                    changes.push({ field: 'Setor', oldValue: local.CodigoSetor, newValue: extSector });
+                }
                 
                 if (changes.length > 0) {
                     alterados.push({
-                        id_pulsus: ext.id_pulsus,
-                        nome: ext.nome,
+                        id_pulsus: extId,
+                        nome: extName,
                         matchType: 'ID_MATCH',
                         existingColab: local,
                         changes,
-                        newData: { codigo_setor: ext.codigo_setor, grupo: ext.grupo }
+                        newData: { codigo_setor: extSector || local.CodigoSetor, grupo: extGroup || local.Grupo }
                     });
                 }
             }
@@ -315,7 +340,8 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
 
     } catch (e) {
         console.error('Erro Import Preview (MariaDB):', e);
-        res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
+        // Retorna erro 500 para o frontend exibir o modal de erro
+        res.status(500).json({ message: "Erro na importação: " + e.message });
     }
 });
 
