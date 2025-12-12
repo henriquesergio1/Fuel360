@@ -1,17 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { Colaborador, TipoVeiculoReembolso, DiffItem } from '../types.ts';
@@ -744,7 +730,7 @@ export const GestaoEquipe: React.FC = () => {
              // Outros sempre no final
              if (a === 'Outros') return 1;
              if (b === 'Outros') return -1;
-             return a.localeCompare(b);
+             return String(a).localeCompare(String(b));
         });
     }, [colaboradores, customGroups]);
 

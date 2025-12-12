@@ -1,240 +1,194 @@
-import { Colaborador, ConfigReembolso, Usuario, AuthResponse, LicenseStatus, SystemConfig, LogSistema, SalvarCalculoPayload, ItemRelatorio, ItemRelatorioAnalitico, Ausencia, IntegrationConfig, ImportPreviewResult, DiffItem } from '../types.ts';
-import * as mockApi from '../api/mockData.ts';
 
-declare global { interface Window { __FUEL360_MODO_MOCK__?: boolean; } }
+import {
+    Colaborador,
+    ConfigReembolso,
+    SystemConfig,
+    Ausencia,
+    Usuario,
+    AuthResponse,
+    LogSistema,
+    ItemRelatorio,
+    ItemRelatorioAnalitico,
+    DiffItem,
+    SalvarCalculoPayload,
+    VisitaPrevista,
+    LicenseStatus,
+    IntegrationConfig,
+    ImportPreviewResult
+} from '../types';
+import * as mockApiData from '../api/mockData.ts';
 
-const getStoredMode = (): boolean | null => {
-    try {
-        const stored = localStorage.getItem('APP_MODE');
-        if (stored === 'MOCK') return true;
-        if (stored === 'API') return false;
-    } catch (e) { console.warn('LocalStorage inacessível:', e); }
-    return null;
+const API_BASE_URL = 'http://localhost:3031';
+const MODE_KEY = 'FUEL360_API_MODE';
+
+export const getCurrentMode = (): 'MOCK' | 'API' => {
+    return (localStorage.getItem(MODE_KEY) as 'MOCK' | 'API') || 'MOCK';
 };
-
-const getHtmlConfig = (): boolean => {
-    if (typeof window !== 'undefined' && window.__FUEL360_MODO_MOCK__ !== undefined) return window.__FUEL360_MODO_MOCK__;
-    return false;
-};
-
-const USE_MOCK = getStoredMode() ?? getHtmlConfig();
-const API_BASE_URL = '/api';
 
 export const toggleMode = (mode: 'MOCK' | 'API') => {
-    localStorage.setItem('APP_MODE', mode);
+    localStorage.setItem(MODE_KEY, mode);
     window.location.reload();
 };
-export const getCurrentMode = () => USE_MOCK ? 'MOCK' : 'API';
 
-// --- HELPER API REAL ---
-const getToken = () => localStorage.getItem('AUTH_TOKEN');
+const USE_MOCK = getCurrentMode() === 'MOCK';
 
-const handleResponse = async (response: Response, isLoginRequest: boolean = false) => {
-    if (response.status === 401 || response.status === 403) {
-        if (isLoginRequest) throw new Error('Falha na autenticação.');
-        window.dispatchEvent(new CustomEvent('FUEL360_UNAUTHORIZED'));
-        throw new Error('Sessão expirada.');
-    }
-    if (response.status === 402) {
-        const errorData = await response.json();
-        const codeTag = errorData.code ? `[${errorData.code}] ` : '';
-        throw new Error(`${codeTag}${errorData.message || 'Modo Somente Leitura.'}`);
-    }
-    if (!response.ok) {
-        let errorMessage = response.statusText;
-        try { const errorData = await response.json(); if (errorData && errorData.message) errorMessage = errorData.message; } catch (e) {}
-        throw new Error(`Erro na API (${response.status}): ${errorMessage}`);
-    }
-    if (response.status === 204) return null;
-    return await response.json();
-};
-
-const apiRequest = async (endpoint: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', body?: any) => {
-    const url = `${API_BASE_URL}/${endpoint.replace(/^\//, '')}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = getToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-
-    const options: RequestInit = { 
-        method, headers, 
-        body: body ? JSON.stringify(body) : undefined,
-        cache: 'no-store' 
+async function apiRequest<T>(endpoint: string, method: string = 'GET', body?: any): Promise<T> {
+    const token = localStorage.getItem('AUTH_TOKEN');
+    const headers: HeadersInit = {
+        'Content-Type': 'application/json'
     };
-    
-    const response = await fetch(url, options);
-    const isLogin = endpoint === '/login';
-    
-    const licenseStatus = response.headers.get('X-License-Status');
-    if (licenseStatus === 'EXPIRED') window.dispatchEvent(new CustomEvent('FUEL360_LICENSE_EXPIRED'));
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
 
-    return handleResponse(response, isLogin);
-};
+    const config: RequestInit = {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined
+    };
+
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+        
+        if (response.status === 401) {
+            window.dispatchEvent(new Event('FUEL360_UNAUTHORIZED'));
+            throw new Error('Sessão expirada');
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `Erro API: ${response.status}`);
+        }
+
+        return await response.json();
+    } catch (error: any) {
+        console.error(`API Call Error (${endpoint}):`, error);
+        throw error;
+    }
+}
 
 // --- API REAL IMPL ---
 const RealService = {
-    getSystemStatus: (): Promise<LicenseStatus> => apiRequest('/system/status', 'GET'),
-    updateLicense: (licenseKey: string): Promise<any> => apiRequest('/license', 'POST', { licenseKey }),
-    getSystemConfig: (): Promise<SystemConfig> => apiRequest('/system/config', 'GET'),
-    updateSystemConfig: (config: SystemConfig): Promise<any> => apiRequest('/system/config', 'PUT', config),
     login: (usuario: string, senha: string): Promise<AuthResponse> => apiRequest('/login', 'POST', { usuario, senha }),
-    getUsuarios: (): Promise<Usuario[]> => apiRequest('/usuarios', 'GET'),
-    createUsuario: (u: any): Promise<Usuario> => apiRequest('/usuarios', 'POST', u),
-    updateUsuario: (id: number, u: any): Promise<Usuario> => apiRequest(`/usuarios/${id}`, 'PUT', u),
-
-    // FUEL360
-    getColaboradores: (): Promise<Colaborador[]> => apiRequest('/colaboradores', 'GET'),
-    createColaborador: (c: Colaborador): Promise<Colaborador> => apiRequest('/colaboradores', 'POST', c),
-    updateColaborador: (id: number, c: Colaborador): Promise<Colaborador> => apiRequest(`/colaboradores/${id}`, 'PUT', c),
+    
+    getSystemStatus: (): Promise<LicenseStatus> => apiRequest('/system/status'),
+    updateLicense: (key: string): Promise<{message: string}> => apiRequest('/system/license', 'POST', { key }),
+    getSystemConfig: (): Promise<SystemConfig> => apiRequest('/system/config'),
+    updateSystemConfig: (config: SystemConfig): Promise<void> => apiRequest('/system/config', 'PUT', config),
+    getIntegrationConfig: (): Promise<IntegrationConfig> => apiRequest('/system/integration'),
+    updateIntegrationConfig: (config: IntegrationConfig): Promise<void> => apiRequest('/system/integration', 'PUT', config),
+    
+    getUsuarios: (): Promise<Usuario[]> => apiRequest('/usuarios'),
+    createUsuario: (usuario: Usuario): Promise<void> => apiRequest('/usuarios', 'POST', usuario),
+    updateUsuario: (id: number, usuario: Usuario): Promise<void> => apiRequest(`/usuarios/${id}`, 'PUT', usuario),
+    
+    getColaboradores: (): Promise<Colaborador[]> => apiRequest('/colaboradores'),
+    createColaborador: (colaborador: Colaborador): Promise<Colaborador> => apiRequest('/colaboradores', 'POST', colaborador),
+    updateColaborador: (id: number, colaborador: Colaborador): Promise<Colaborador> => apiRequest(`/colaboradores/${id}`, 'PUT', colaborador),
     deleteColaborador: (id: number): Promise<void> => apiRequest(`/colaboradores/${id}`, 'DELETE'),
-    moveColaboradoresToGroup: (ids: number[], grupo: string): Promise<{count: number}> => apiRequest('/colaboradores/move', 'POST', { ids, grupo }),
-    // Novo v1.5.0
-    bulkUpdateColaboradores: (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string): Promise<{count: number}> => apiRequest('/colaboradores/update-field', 'POST', { ids, field, value, reason }),
-    getSugestoesVinculo: (ids: number[]): Promise<any[]> => apiRequest('/colaboradores/sugestao-vinculo', 'POST', { ids }),
-
-    // Integração Externa (Refatorado)
-    getIntegrationConfig: (): Promise<IntegrationConfig> => apiRequest('/integracao/config', 'GET'),
-    updateIntegrationConfig: (config: IntegrationConfig): Promise<void> => apiRequest('/integracao/config', 'PUT', config),
-    getImportPreview: (): Promise<ImportPreviewResult> => apiRequest('/integracao/preview', 'POST', {}),
-    syncColaboradores: (items: DiffItem[]): Promise<{message: string, count: number}> => apiRequest('/integracao/sync', 'POST', { items }),
-
-    getFuelConfig: (): Promise<ConfigReembolso> => apiRequest('/fuel-config', 'GET'),
-    updateFuelConfig: (c: ConfigReembolso): Promise<void> => apiRequest('/fuel-config', 'PUT', c),
-    getFuelConfigHistory: (): Promise<LogSistema[]> => apiRequest('/fuel-config/history', 'GET'),
-
-    // Ausências
-    getAusencias: (): Promise<Ausencia[]> => apiRequest('/ausencias', 'GET'),
-    createAusencia: (a: any): Promise<Ausencia> => apiRequest('/ausencias', 'POST', a),
-    deleteAusencia: (id: number, motivo: string): Promise<void> => apiRequest(`/ausencias/${id}`, 'DELETE', { motivo }),
-
-    // Histórico e Relatórios
-    checkCalculoExists: (periodo: string): Promise<boolean> => apiRequest(`/calculos/check-periodo?periodo=${encodeURIComponent(periodo)}`, 'GET').then(r => r.exists),
-    saveCalculo: (payload: SalvarCalculoPayload): Promise<any> => apiRequest('/calculos', 'POST', payload),
-    // Atualizado v1.5: Suporte a filtro de grupo
-    getRelatorioReembolso: (start: string, end: string, colabId?: string, grupo?: string): Promise<ItemRelatorio[]> => {
-        const query = new URLSearchParams({ startDate: start, endDate: end });
-        if(colabId) query.append('colaboradorId', colabId);
-        if(grupo) query.append('grupo', grupo);
-        return apiRequest(`/relatorios/reembolso?${query.toString()}`, 'GET');
+    moveColaboradoresToGroup: (ids: number[], group: string): Promise<void> => apiRequest('/colaboradores/move', 'POST', { ids, group }),
+    bulkUpdateColaboradores: (ids: number[], field: string, value: any, reason: string): Promise<void> => apiRequest('/colaboradores/bulk-update', 'POST', { ids, field, value, reason }),
+    getImportPreview: (): Promise<ImportPreviewResult> => apiRequest('/colaboradores/import-preview'),
+    syncColaboradores: (items: DiffItem[]): Promise<void> => apiRequest('/colaboradores/sync', 'POST', { items }),
+    getSugestoesVinculo: (ids: number[]): Promise<any[]> => apiRequest('/colaboradores/suggestions', 'POST', { ids }),
+    
+    getFuelConfig: (): Promise<ConfigReembolso> => apiRequest('/config/fuel'),
+    updateFuelConfig: (config: ConfigReembolso): Promise<void> => apiRequest('/config/fuel', 'PUT', config),
+    getFuelConfigHistory: (): Promise<LogSistema[]> => apiRequest('/config/fuel/history'),
+    
+    getAusencias: (): Promise<Ausencia[]> => apiRequest('/ausencias'),
+    createAusencia: (ausencia: any): Promise<Ausencia> => apiRequest('/ausencias', 'POST', ausencia),
+    deleteAusencia: (id: number, reason: string): Promise<void> => apiRequest(`/ausencias/${id}`, 'DELETE', { reason }),
+    corrigirAusenciasHistorico: (ids: number[]): Promise<void> => apiRequest('/ausencias/fix-history', 'POST', { ids }),
+    
+    saveCalculo: (payload: SalvarCalculoPayload): Promise<void> => apiRequest('/calculo', 'POST', payload),
+    checkCalculoExists: (periodo: string): Promise<boolean> => apiRequest(`/calculo/exists?periodo=${encodeURIComponent(periodo)}`),
+    
+    getRelatorioReembolso: (startDate: string, endDate: string, colab?: string, group?: string): Promise<ItemRelatorio[]> => {
+        const q = new URLSearchParams({ startDate, endDate });
+        if(colab) q.append('colab', colab);
+        if(group) q.append('group', group);
+        return apiRequest(`/relatorios/reembolso?${q.toString()}`);
     },
-    // Atualizado v1.5: Suporte a filtro de grupo e correção retroativa
-    getRelatorioAnalitico: (start: string, end: string, colabId?: string, grupo?: string): Promise<ItemRelatorioAnalitico[]> => {
-        const query = new URLSearchParams({ startDate: start, endDate: end });
-        if(colabId) query.append('colaboradorId', colabId);
-        if(grupo) query.append('grupo', grupo);
-        return apiRequest(`/relatorios/analitico?${query.toString()}`, 'GET');
+    getRelatorioAnalitico: (startDate: string, endDate: string, colab?: string, group?: string): Promise<ItemRelatorioAnalitico[]> => {
+        const q = new URLSearchParams({ startDate, endDate });
+        if(colab) q.append('colab', colab);
+        if(group) q.append('group', group);
+        return apiRequest(`/relatorios/analitico?${q.toString()}`);
     },
-    corrigirAusenciasHistorico: (idsDiarios: number[]): Promise<{count: number}> => apiRequest('/calculos/corrigir-ausencias', 'POST', { idsDiarios }),
-
-    // Logs
-    logAction: (acao: string, detalhes: string): Promise<void> => apiRequest('/logs', 'POST', { acao, detalhes })
+    
+    logAction: (acao: string, detalhes: string): Promise<void> => apiRequest('/logs', 'POST', { acao, detalhes }),
+    
+    getVisitasPrevistas: (startDate?: string, endDate?: string): Promise<VisitaPrevista[]> => {
+        let query = '/roteiro/previsao';
+        if (startDate && endDate) {
+            query += `?startDate=${startDate}&endDate=${endDate}`;
+        }
+        return apiRequest(query);
+    }
 };
 
 // --- API MOCK IMPL ---
 const MockService = {
-    getSystemStatus: async (): Promise<LicenseStatus> => ({ status: 'ACTIVE', client: 'Mock Client', expiresAt: new Date(Date.now() + 31536000000) }),
-    updateLicense: async () => ({ success: true, message: 'Licença Mock Ativada' }),
-    getSystemConfig: async () => ({ companyName: 'Mock Transportes', logoUrl: '' }),
-    updateSystemConfig: async () => ({ success: true }),
-    login: mockApi.mockLogin,
-    getUsuarios: mockApi.getMockUsuarios,
-    createUsuario: mockApi.createMockUsuario,
-    updateUsuario: mockApi.updateMockUsuario,
-
-    getColaboradores: mockApi.getMockColaboradores,
-    createColaborador: mockApi.createMockColaborador,
-    updateColaborador: (id: number, c: Colaborador) => mockApi.updateMockColaborador(id, c),
-    deleteColaborador: mockApi.deleteMockColaborador,
-    moveColaboradoresToGroup: async (ids: number[], grupo: string) => { await new Promise(r => setTimeout(r, 500)); return { count: ids.length }; },
-    bulkUpdateColaboradores: async (ids: number[], field: 'TipoVeiculo' | 'Ativo', value: any, reason: string) => {
-         await new Promise(r => setTimeout(r, 500)); 
-         console.log(`MOCK BULK UPDATE: ${ids.length} items. Field: ${field}, Value: ${value}, Reason: ${reason}`);
-         return { count: ids.length }; 
+    login: async (usuario: string, senha: string): Promise<AuthResponse> => {
+        await new Promise(r => setTimeout(r, 500));
+        if (usuario === 'admin' && senha === 'admin') {
+            return { token: 'mock-token', user: { ID_Usuario: 1, Nome: 'Admin Mock', Usuario: 'admin', Perfil: 'Admin', Ativo: true } };
+        }
+        throw new Error('Credenciais inválidas (Mock: admin/admin)');
     },
-    getSugestoesVinculo: async (ids: number[]) => {
-        await new Promise(r => setTimeout(r, 800));
-        // Mock smart suggestion
-        return ids.map(id => ({
-             ID_Pulsus: id,
-             NomeSuggestion: `Sugestão Histórica ${id}`,
-             GrupoSuggestion: 'Vendedor'
-        }));
-    },
-    
-    // Mock Import
-    getIntegrationConfig: async () => ({ extDb_Host: '127.0.0.1', extDb_Port: 3306, extDb_User: 'root', extDb_Database: 'mock_db', extDb_Query: 'SELECT ...' }),
+    getSystemStatus: async (): Promise<LicenseStatus> => ({ status: 'ACTIVE', client: 'Mock Client', expiresAt: '2030-12-31' }),
+    updateLicense: async () => ({ message: 'Licença ativada (Mock)' }),
+    getSystemConfig: async (): Promise<SystemConfig> => ({ companyName: 'Fuel360 Mock', logoUrl: '' }),
+    updateSystemConfig: async () => {},
+    getIntegrationConfig: async (): Promise<IntegrationConfig> => ({ extDb_Host: 'localhost', extDb_Port: 3306, extDb_User: 'root', extDb_Pass: '', extDb_Database: 'db', extDb_Query: '' }),
     updateIntegrationConfig: async () => {},
-    getImportPreview: async (): Promise<ImportPreviewResult> => {
-        await new Promise(r => setTimeout(r, 1500));
-        return { 
-            novos: [
-                { id_pulsus: 999, nome: 'Novo Colab Mock', changes: [], newData: { id_pulsus: 999, nome: 'Novo Colab Mock', codigo_setor: 505, grupo: 'Vendedor' } }
-            ], 
-            alterados: [
-                { id_pulsus: 550, nome: 'João da Silva', changes: [{ field: 'CodigoSetor', oldValue: 101, newValue: 105 }], newData: { id_pulsus: 550, nome: 'João da Silva', codigo_setor: 105, grupo: 'Vendedor' } }
-            ],
-            conflitos: [],
-            totalExternal: 20 
-        };
-    },
-    syncColaboradores: async () => { 
-        await new Promise(r => setTimeout(r, 1000));
-        return { message: "Sincronização Simulada Concluída", count: 2 };
-    },
-
-    getFuelConfig: mockApi.getMockFuelConfig,
-    updateFuelConfig: mockApi.updateMockFuelConfig,
+    getUsuarios: async (): Promise<Usuario[]> => ([{ ID_Usuario: 1, Nome: 'Admin Mock', Usuario: 'admin', Perfil: 'Admin', Ativo: true }]),
+    createUsuario: async () => {},
+    updateUsuario: async () => {},
+    getColaboradores: async (): Promise<Colaborador[]> => ([
+        { ID_Colaborador: 1, ID_Pulsus: 100, CodigoSetor: 1, Nome: 'João Silva', Grupo: 'Vendedor', TipoVeiculo: 'Carro', Ativo: true },
+        { ID_Colaborador: 2, ID_Pulsus: 101, CodigoSetor: 2, Nome: 'Maria Santos', Grupo: 'Promotor', TipoVeiculo: 'Moto', Ativo: true }
+    ]),
+    createColaborador: async (c: Colaborador) => ({ ...c, ID_Colaborador: Math.random() }),
+    updateColaborador: async (id: number, c: Colaborador) => c,
+    deleteColaborador: async () => {},
+    moveColaboradoresToGroup: async () => {},
+    bulkUpdateColaboradores: async () => {},
+    getImportPreview: async (): Promise<ImportPreviewResult> => ({ novos: [], alterados: [], conflitos: [], totalExternal: 0 }),
+    syncColaboradores: async () => {},
+    getSugestoesVinculo: async () => [],
+    getFuelConfig: async (): Promise<ConfigReembolso> => ({ PrecoCombustivel: 5.50, KmL_Carro: 10, KmL_Moto: 35 }),
+    updateFuelConfig: async () => {},
     getFuelConfigHistory: async () => [],
-
-    getAusencias: mockApi.getMockAusencias,
-    createAusencia: mockApi.createMockAusencia,
-    deleteAusencia: mockApi.deleteMockAusencia,
-
-    checkCalculoExists: (periodo: string) => mockApi.checkMockCalculoExists(periodo).then(r => r.exists),
-    saveCalculo: mockApi.saveMockCalculo,
-    getRelatorioReembolso: (start: string, end: string, colabId?: string, grupo?: string) => mockApi.getMockRelatorio(start, end, colabId, grupo),
-    getRelatorioAnalitico: (start: string, end: string, colabId?: string, grupo?: string) => mockApi.getMockRelatorioAnalitico(start, end, colabId, grupo),
-    corrigirAusenciasHistorico: async () => ({ count: 1 }),
-
-    logAction: async () => {} 
+    getAusencias: async (): Promise<Ausencia[]> => [],
+    createAusencia: async (a: any) => ({ ...a, ID_Ausencia: Math.random() }),
+    deleteAusencia: async () => {},
+    corrigirAusenciasHistorico: async () => {},
+    saveCalculo: async () => {},
+    checkCalculoExists: async () => false,
+    getRelatorioReembolso: async () => [],
+    getRelatorioAnalitico: async () => [],
+    logAction: async () => {},
+    getVisitasPrevistas: async (startDate?: string, endDate?: string): Promise<VisitaPrevista[]> => {
+        await new Promise(r => setTimeout(r, 1000));
+        return mockApiData.getMockVisitasPrevistas();
+    }
 };
 
-// --- EXPORT ---
-export const getSystemStatus = USE_MOCK ? MockService.getSystemStatus : RealService.getSystemStatus;
-export const updateLicense = USE_MOCK ? MockService.updateLicense : RealService.updateLicense;
-export const getSystemConfig = USE_MOCK ? MockService.getSystemConfig : RealService.getSystemConfig;
-export const updateSystemConfig = USE_MOCK ? MockService.updateSystemConfig : RealService.updateSystemConfig;
-export const login = USE_MOCK ? MockService.login : RealService.login;
-export const getUsuarios = USE_MOCK ? MockService.getUsuarios : RealService.getUsuarios;
-export const createUsuario = USE_MOCK ? MockService.createUsuario : RealService.createUsuario;
-export const updateUsuario = USE_MOCK ? MockService.updateUsuario : RealService.updateUsuario;
+const Service = USE_MOCK ? MockService : RealService;
 
-export const getColaboradores = USE_MOCK ? MockService.getColaboradores : RealService.getColaboradores;
-export const createColaborador = USE_MOCK ? MockService.createColaborador : RealService.createColaborador;
-export const updateColaborador = USE_MOCK ? MockService.updateColaborador : RealService.updateColaborador;
-export const deleteColaborador = USE_MOCK ? MockService.deleteColaborador : RealService.deleteColaborador;
-export const moveColaboradoresToGroup = USE_MOCK ? MockService.moveColaboradoresToGroup : RealService.moveColaboradoresToGroup;
-export const bulkUpdateColaboradores = USE_MOCK ? MockService.bulkUpdateColaboradores : RealService.bulkUpdateColaboradores;
-export const getSugestoesVinculo = USE_MOCK ? MockService.getSugestoesVinculo : RealService.getSugestoesVinculo;
-
-// Integração
-export const getIntegrationConfig = USE_MOCK ? MockService.getIntegrationConfig : RealService.getIntegrationConfig;
-export const updateIntegrationConfig = USE_MOCK ? MockService.updateIntegrationConfig : RealService.updateIntegrationConfig;
-export const getImportPreview = USE_MOCK ? MockService.getImportPreview : RealService.getImportPreview;
-export const syncColaboradores = USE_MOCK ? MockService.syncColaboradores : RealService.syncColaboradores;
-
-
-export const getFuelConfig = USE_MOCK ? MockService.getFuelConfig : RealService.getFuelConfig;
-export const updateFuelConfig = USE_MOCK ? MockService.updateFuelConfig : RealService.updateFuelConfig;
-export const getFuelConfigHistory = USE_MOCK ? MockService.getFuelConfigHistory : RealService.getFuelConfigHistory;
-
-export const getAusencias = USE_MOCK ? MockService.getAusencias : RealService.getAusencias;
-export const createAusencia = USE_MOCK ? MockService.createAusencia : RealService.createAusencia;
-export const deleteAusencia = USE_MOCK ? MockService.deleteAusencia : RealService.deleteAusencia;
-
-export const checkCalculoExists = USE_MOCK ? MockService.checkCalculoExists : RealService.checkCalculoExists;
-export const saveCalculo = USE_MOCK ? MockService.saveCalculo : RealService.saveCalculo;
-export const getRelatorioReembolso = USE_MOCK ? MockService.getRelatorioReembolso : RealService.getRelatorioReembolso;
-export const getRelatorioAnalitico = USE_MOCK ? MockService.getRelatorioAnalitico : RealService.getRelatorioAnalitico;
-export const corrigirAusenciasHistorico = USE_MOCK ? MockService.corrigirAusenciasHistorico : RealService.corrigirAusenciasHistorico;
-
-export const logAction = USE_MOCK ? MockService.logAction : RealService.logAction;
+export const {
+    login,
+    getSystemStatus, updateLicense,
+    getSystemConfig, updateSystemConfig,
+    getIntegrationConfig, updateIntegrationConfig,
+    getUsuarios, createUsuario, updateUsuario,
+    getColaboradores, createColaborador, updateColaborador, deleteColaborador, moveColaboradoresToGroup, bulkUpdateColaboradores, getImportPreview, syncColaboradores, getSugestoesVinculo,
+    getFuelConfig, updateFuelConfig, getFuelConfigHistory,
+    getAusencias, createAusencia, deleteAusencia, corrigirAusenciasHistorico,
+    saveCalculo, checkCalculoExists,
+    getRelatorioReembolso, getRelatorioAnalitico,
+    logAction,
+    getVisitasPrevistas
+} = Service;

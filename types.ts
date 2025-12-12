@@ -1,114 +1,47 @@
-
-
-// Tipos Básicos do Sistema
-export interface SystemConfig {
-    companyName: string;
-    logoUrl: string;
-}
-
-export interface LicenseStatus {
-    status: 'ACTIVE' | 'EXPIRED' | 'INVALID' | 'MISSING';
-    client?: string;
-    expiresAt?: Date;
-}
-
 export interface Usuario {
     ID_Usuario: number;
     Nome: string;
     Usuario: string;
+    Senha?: string;
     Perfil: 'Admin' | 'Operador';
     Ativo: boolean;
-    Senha?: string;
-    DataCriacao?: string;
 }
 
 export interface AuthResponse {
-    user: Usuario;
     token: string;
+    user: Usuario;
 }
-
-// --- FUEL360: REEMBOLSO ---
 
 export type TipoVeiculoReembolso = 'Carro' | 'Moto';
 
 export interface Colaborador {
     ID_Colaborador: number;
-    ID_Pulsus: number; // ID vindo do CSV. Único Globalmente.
-    CodigoSetor: number; // Código do setor (ex: 101). Único por Grupo.
+    ID_Pulsus: number;
+    CodigoSetor: number;
     Nome: string;
-    Grupo: string; // Vendedor, Promotor, Supervisor
+    Grupo: string;
     TipoVeiculo: TipoVeiculoReembolso;
     Ativo: boolean;
-    
-    // Auditoria
-    UsuarioCriacao?: string;
-    DataCriacao?: string;
     UsuarioAlteracao?: string;
-    DataAlteracao?: string;
     MotivoAlteracao?: string;
-}
-
-// Novo v1.4.6: Importação Externa Refatorada
-export interface IntegrationConfig {
-    extDb_Host: string;
-    extDb_Port: number;
-    extDb_User: string;
-    extDb_Pass?: string; // Opcional no retorno do get
-    extDb_Database: string;
-    extDb_Query: string;
-}
-
-export interface DiffItem {
-    id_pulsus: number;
-    nome: string;
-    changes: {
-        field: string;
-        oldValue: any;
-        newValue: any;
-    }[];
-    newData: {
-        id_pulsus: number;
-        nome: string;
-        codigo_setor: number;
-        grupo: string;
-    };
-    // Novo v1.8: Suporte a conflitos
-    matchType?: 'ID_MATCH' | 'SECTOR_MATCH' | 'NEW';
-    existingColab?: {
-        ID_Colaborador: number;
-        ID_Pulsus: number;
-        Nome: string;
-    };
-    syncAction?: 'INSERT' | 'UPDATE_DATA' | 'UPDATE_ID'; // Controle de ação no frontend
-}
-
-export interface ImportPreviewResult {
-    novos: DiffItem[];
-    alterados: DiffItem[];
-    conflitos: DiffItem[]; // Novo v1.8
-    totalExternal: number;
-}
-
-// Novo v1.3.7: Gestão de Ausências
-export interface Ausencia {
-    ID_Ausencia: number;
-    ID_Colaborador: number;
-    ID_Pulsus?: number; // Auxiliar para exibição/lógica
-    NomeColaborador?: string; // Auxiliar para exibição
-    DataInicio: string; // YYYY-MM-DD
-    DataFim: string; // YYYY-MM-DD
-    Motivo: string;
 }
 
 export interface ConfigReembolso {
     PrecoCombustivel: number;
     KmL_Carro: number;
     KmL_Moto: number;
-    
-    // Auditoria
-    UsuarioAlteracao?: string;
-    DataAlteracao?: string;
     MotivoAlteracao?: string;
+}
+
+export interface LicenseStatus {
+    status: 'ACTIVE' | 'EXPIRED' | 'INVALID';
+    client?: string;
+    expiresAt?: string;
+}
+
+export interface SystemConfig {
+    companyName: string;
+    logoUrl: string;
 }
 
 export interface LogSistema {
@@ -119,52 +52,50 @@ export interface LogSistema {
     Detalhes: string;
 }
 
-export interface RegistroKM {
-    ID_Pulsus: number;
-    Nome: string;
-    Grupo: string;
-    Data: string;
-    KM: number;
-    ValorCalculado?: number; // Auxiliar
-    // Novo v1.4.0
-    Observacao?: string;
+export interface Ausencia {
+    ID_Ausencia: number;
+    ID_Colaborador: number;
+    NomeColaborador?: string;
+    ID_Pulsus?: number;
+    DataInicio: string; // ISO Date YYYY-MM-DD
+    DataFim: string; // ISO Date YYYY-MM-DD
+    Motivo: string;
 }
 
-// Interface auxiliar para o Staging (Conferência)
-export interface StagingRecord {
-    id: string; // Unique ID for React Key
+export interface IntegrationConfig {
+    extDb_Host: string;
+    extDb_Port: number;
+    extDb_User: string;
+    extDb_Pass: string;
+    extDb_Database: string;
+    extDb_Query: string;
+}
+
+export interface DiffItem {
     id_pulsus: number;
     nome: string;
-    dataOriginal: string; // String do CSV (ex: 15/05/2025)
-    dataISO: string; // YYYY-MM-DD para ordenação
-    kmOriginal: number;
-    kmConsiderado: number;
-    
-    // Status Flags
-    isLowKm: boolean; // < 1km
-    isBlocked: boolean; // Ausência
-    blockReason?: string;
-    isEdited: boolean; // Ajuste manual
-    editReason?: string;
-    
-    colaboradorRef?: Colaborador; // Referencia se encontrado
+    matchType: 'FULL_MATCH' | 'ID_MATCH' | 'NAME_MATCH' | 'NO_MATCH';
+    newData: {
+        codigo_setor: number;
+        grupo: string;
+    };
+    existingColab?: Colaborador;
+    changes: { field: string, oldValue: any, newValue: any }[];
+    syncAction?: 'UPDATE_DATA' | 'UPDATE_ID' | 'INSERT';
 }
 
-export interface CalculoReembolso {
-    Colaborador: Colaborador;
-    TotalKM: number;
-    LitrosEstimados: number;
-    ValorPagar: number;
-    Registros: RegistroKM[]; // Detalhe dos dias
+export interface ImportPreviewResult {
+    novos: DiffItem[];
+    alterados: DiffItem[];
+    conflitos: DiffItem[];
+    totalExternal: number;
 }
-
-// --- RELATÓRIOS E HISTÓRICO ---
 
 export interface SalvarCalculoPayload {
     Periodo: string;
     TotalGeral: number;
-    Overwrite?: boolean; // Novo v1.3.8: Sobrescrever se existir
-    MotivoOverwrite?: string; // Novo v1.3.9: Justificativa obrigatória para auditoria
+    Overwrite?: boolean;
+    MotivoOverwrite?: string;
     Itens: {
         ID_Pulsus: number;
         Nome: string;
@@ -174,17 +105,15 @@ export interface SalvarCalculoPayload {
         ValorReembolso: number;
         ParametroPreco: number;
         ParametroKmL: number;
-        // Novo v1.3.6: Detalhamento diário para salvar
         RegistrosDiarios: {
             Data: string;
             KM: number;
             Valor: number;
-            Observacao?: string; // Novo v1.4.0
+            Observacao?: string;
         }[];
     }[];
 }
 
-// Relatório Sintético (Resumido por colaborador)
 export interface ItemRelatorio {
     ID_Detalhe: number;
     DataGeracao: string;
@@ -200,22 +129,78 @@ export interface ItemRelatorio {
     ParametroKmL: number;
 }
 
-// Relatório Analítico (Detalhado dia a dia) - Novo v1.3.6
 export interface ItemRelatorioAnalitico {
     ID_Diario: number;
     DataOcorrencia: string;
     KM_Dia: number;
     Valor_Dia: number;
-    Observacao?: string; // Novo v1.4.0
-    // Dados 'flattened' do pai
+    Observacao?: string;
     ID_Pulsus: number;
     NomeColaborador: string;
     Grupo: string;
     TipoVeiculo: string;
     DataGeracao: string;
     PeriodoReferencia: string;
-    
-    // Novo v1.6: Flag de Conflito Retroativo
     TemAusencia?: boolean;
     MotivoAusencia?: string;
+}
+
+export interface VisitaPrevista {
+    Cod_Vend: number;
+    Nome_Vendedor: string;
+    Cod_Supervisor: number;
+    Nome_Supervisor: string;
+    Cod_Cliente: number;
+    Razao_Social: string;
+    Dia_Semana: string;
+    Periodicidade: string;
+    Data_da_Visita: string; // ISO Date
+    Endereco: string;
+    Bairro: string;
+    Cidade: string;
+    CEP: string;
+    Lat: number;
+    Long: number;
+}
+
+export interface RotaCalculada {
+    Vendedor: string;
+    Data: string;
+    Visitas: VisitaPrevista[];
+    DistanciaReta: number;
+    DistanciaEstimada: number; // Com fator de tortuosidade
+}
+
+export interface CalculoReembolso {
+    Colaborador: Colaborador;
+    TotalKM: number;
+    LitrosEstimados: number;
+    ValorPagar: number;
+    Registros: RegistroKM[];
+}
+
+export interface RegistroKM {
+    ID_Pulsus: number;
+    Nome: string;
+    Grupo: string;
+    Data: string;
+    KM: number;
+    ValorCalculado: number;
+    Observacao: string;
+}
+
+export interface StagingRecord {
+    id: string;
+    id_pulsus: number;
+    nome: string;
+    dataOriginal: string;
+    dataISO: string;
+    kmOriginal: number;
+    kmConsiderado: number;
+    isLowKm: boolean;
+    isBlocked: boolean;
+    blockReason: string;
+    isEdited: boolean;
+    editReason?: string;
+    colaboradorRef?: Colaborador;
 }

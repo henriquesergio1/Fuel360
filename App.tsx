@@ -1,12 +1,4 @@
 
-
-
-
-
-
-
-
-
 import React, { useState, useContext, useEffect } from 'react';
 import { Importacao } from './components/Importacao.tsx';
 import { Configuracao } from './components/Configuracao.tsx';
@@ -14,14 +6,15 @@ import { AdminPanel } from './components/AdminPanel.tsx';
 import { GestaoEquipe } from './components/GestaoEquipe.tsx';
 import { Relatorios } from './components/Relatorios.tsx';
 import { GestaoAusencias } from './components/GestaoAusencias.tsx';
+import { Roteirizador } from './components/Roteirizador.tsx'; // Novo Import
 import { Login } from './components/Login.tsx';
 import { DataProvider, DataContext } from './context/DataContext.tsx';
 import { AuthProvider, useAuth } from './context/AuthContext.tsx';
-import { FuelLogo, CogIcon, UserGroupIcon, CalculatorIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ExclamationIcon, UsersIcon, ChartBarIcon, CalendarIcon } from './components/icons.tsx';
+import { FuelLogo, CogIcon, UserGroupIcon, CalculatorIcon, ChevronDoubleLeftIcon, ChevronDoubleRightIcon, ExclamationIcon, UsersIcon, ChartBarIcon, CalendarIcon, LocationMarkerIcon } from './components/icons.tsx';
 import { getSystemStatus } from './services/apiService.ts';
 import { LicenseStatus } from './types.ts';
 
-type View = 'calculo' | 'equipe' | 'ausencias' | 'relatorios' | 'config' | 'admin';
+type View = 'calculo' | 'roteirizador' | 'equipe' | 'ausencias' | 'relatorios' | 'config' | 'admin';
 
 interface SidebarProps {
     activeView: View;
@@ -37,6 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, setView, isCollapsed, set
     
     const navItems = [
         { id: 'calculo', label: 'Cálculo de Reembolso', icon: CalculatorIcon },
+        { id: 'roteirizador', label: 'Roteirizador Previsto', icon: LocationMarkerIcon }, // Novo Item
         { id: 'equipe', label: 'Equipe & Setores', icon: UsersIcon },
         { id: 'ausencias', label: 'Gestão de Ausências', icon: CalendarIcon },
         { id: 'relatorios', label: 'Relatórios', icon: ChartBarIcon },
@@ -129,7 +123,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, setView, isCollapsed, set
                 </div>
                 {!isCollapsed && (
                     <div className="mt-4 text-[10px] text-center text-slate-300 font-mono">
-                        v1.4.5
+                        v1.4.6
                     </div>
                 )}
             </div>
@@ -156,6 +150,7 @@ const MainLayout: React.FC = () => {
     const renderContent = () => {
         switch (activeView) {
             case 'calculo': return <Importacao />;
+            case 'roteirizador': return <Roteirizador />; // Novo Componente
             case 'equipe': return <GestaoEquipe />;
             case 'ausencias': return <GestaoAusencias />;
             case 'relatorios': return <Relatorios />;
