@@ -1,4 +1,5 @@
 
+
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { Colaborador, TipoVeiculoReembolso, DiffItem } from '../types.ts';
@@ -317,7 +318,8 @@ const SyncAuditModal: React.FC<{
                                                     <tr key={item.id_pulsus} className="hover:bg-amber-50/20">
                                                         <td className="p-3 text-center align-top pt-4"><input type="checkbox" checked={selection.has(item.id_pulsus)} onChange={() => toggleSelection(item.id_pulsus)}/></td>
                                                         <td className="p-3 align-top">
-                                                            <div className="font-bold text-slate-800">{item.id_pulsus} - {item.nome}</div>
+                                                            <div className="font-bold text-slate-800">{item.nome}</div>
+                                                            <div className="text-slate-400 font-mono">ID: {item.id_pulsus}</div>
                                                         </td>
                                                         <td className="p-3">
                                                             {item.changes.map((change, idx) => (
@@ -953,7 +955,8 @@ export const GestaoEquipe: React.FC = () => {
                                     className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                 />
                             </th>
-                            <th className="p-5 tracking-wider">Colaborador</th>
+                            <th className="p-5 tracking-wider">ID Pulsus</th>
+                            <th className="p-5 tracking-wider">Nome</th>
                             <th className="p-5 tracking-wider">Cód. Setor</th>
                             <th className="p-5 tracking-wider text-center">Veículo</th>
                             <th className="p-5 tracking-wider text-center">Status</th>
@@ -971,8 +974,9 @@ export const GestaoEquipe: React.FC = () => {
                                         className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                     />
                                 </td>
+                                <td className="p-5 font-mono text-slate-500">{colab.ID_Pulsus}</td>
                                 <td className="p-5 font-bold text-slate-800 text-base">
-                                    {colab.ID_Pulsus} - {colab.Nome}
+                                    {colab.Nome}
                                     {colab.UsuarioAlteracao && (
                                         <div className="text-[10px] font-normal text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity mt-1 flex items-center">
                                             <span className="w-1.5 h-1.5 bg-blue-400 rounded-full mr-1.5"></span>
