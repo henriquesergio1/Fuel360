@@ -256,6 +256,54 @@ app.put('/system/integration', authenticateToken, async (req, res) => {
     }
 });
 
+// --- NOVO: Rota de Teste de Conexão ---
+app.post('/system/test-connection', authenticateToken, async (req, res) => {
+    const { config } = req.body;
+    
+    if (!config || !config.host) {
+        return res.status(400).json({ success: false, message: 'Configuração inválida.' });
+    }
+
+    try {
+        if (config.type === 'MARIADB') {
+            const conn = await mariadb.createConnection({
+                host: config.host,
+                port: parseInt(config.port) || 3306,
+                user: config.user,
+                password: config.pass,
+                database: config.database,
+                connectTimeout: 5000
+            });
+            await conn.query("SELECT 1");
+            await conn.end();
+            res.json({ success: true, message: 'Conexão MariaDB/MySQL bem sucedida!' });
+        } else if (config.type === 'MSSQL') {
+             const testConfig = {
+                server: config.host,
+                authentication: {
+                    type: 'default',
+                    options: { userName: config.user, password: config.pass }
+                },
+                options: {
+                    database: config.database,
+                    port: parseInt(config.port) || 1433,
+                    encrypt: false,
+                    trustServerCertificate: true,
+                    connectTimeout: 5000
+                }
+            };
+            await executeQuery(testConfig, "SELECT 1");
+            res.json({ success: true, message: 'Conexão SQL Server bem sucedida!' });
+        } else {
+            res.status(400).json({ success: false, message: 'Tipo de banco desconhecido.' });
+        }
+    } catch (e) {
+        console.error("Erro no teste de conexão:", e);
+        res.json({ success: false, message: 'Falha na conexão: ' + e.message });
+    }
+});
+
+
 // --- IMPORT PREVIEW (MariaDB) ---
 app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => {
     try {
@@ -286,6 +334,15 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             throw new Error("A query não retornou uma lista válida.");
         }
 
+        // --- FIX BIGINT SERIALIZATION ---
+        // MariaDB retorna BigInt para colunas inteiras grandes ou counts.
+        // JSON.stringify falha com BigInt. Convertemos para string antes.
+        externalRows = JSON.parse(JSON.stringify(externalRows, (key, value) =>
+            typeof value === 'bigint'
+                ? value.toString()
+                : value
+        ));
+
         const { rows: localRows } = await executeQuery(dbConfig, "SELECT * FROM Colaboradores WHERE Ativo = 1");
 
         const novos = [];
@@ -294,7 +351,6 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
 
         externalRows.forEach(ext => {
             // Tenta mapear colunas independentemente de case ou alias
-            // Procura chaves que pareçam com id_pulsus, nome, etc.
             const getId = (obj) => obj.id_pulsus || obj.ID_PULSUS || obj.id || obj.ID;
             const getName = (obj) => obj.nome || obj.NOME || obj.name || obj.NAME;
             const getSector = (obj) => obj.codigo_setor || obj.CODIGO_SETOR || obj.setor || obj.SETOR;
@@ -305,27 +361,26 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             const extSector = getSector(ext);
             const extGroup = getGroup(ext);
 
-            if (!extId || !extName) return; // Ignora linhas inválidas
+            if (!extId || !extName) return; 
 
             const local = localRows.find(l => l.ID_Pulsus == extId);
             
             if (!local) {
                 novos.push({
-                    id_pulsus: extId,
+                    id_pulsus: parseInt(extId), // Garante número para o frontend
                     nome: extName,
                     matchType: 'NEW',
                     newData: { codigo_setor: extSector || 0, grupo: extGroup || 'Vendedor' }
                 });
             } else {
                 const changes = [];
-                // Compara apenas se o valor externo existir
                 if (extSector && String(local.CodigoSetor) !== String(extSector)) {
                     changes.push({ field: 'Setor', oldValue: local.CodigoSetor, newValue: extSector });
                 }
                 
                 if (changes.length > 0) {
                     alterados.push({
-                        id_pulsus: extId,
+                        id_pulsus: parseInt(extId), // Garante número
                         nome: extName,
                         matchType: 'ID_MATCH',
                         existingColab: local,
@@ -340,7 +395,6 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
 
     } catch (e) {
         console.error('Erro Import Preview (MariaDB):', e);
-        // Retorna erro 500 para o frontend exibir o modal de erro
         res.status(500).json({ message: "Erro na importação: " + e.message });
     }
 });

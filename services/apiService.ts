@@ -1,4 +1,5 @@
 
+
 import {
     Colaborador,
     ConfigReembolso,
@@ -14,7 +15,8 @@ import {
     VisitaPrevista,
     LicenseStatus,
     IntegrationConfig,
-    ImportPreviewResult
+    ImportPreviewResult,
+    DbConnectionConfig
 } from '../types';
 import * as mockApiData from '../api/mockData.ts';
 
@@ -87,6 +89,7 @@ const RealService = {
     updateSystemConfig: (config: SystemConfig): Promise<void> => apiRequest('/system/config', 'PUT', config),
     getIntegrationConfig: (): Promise<IntegrationConfig> => apiRequest('/system/integration'),
     updateIntegrationConfig: (config: IntegrationConfig): Promise<void> => apiRequest('/system/integration', 'PUT', config),
+    testDbConnection: (config: DbConnectionConfig): Promise<{success: boolean, message: string}> => apiRequest('/system/test-connection', 'POST', { config }), // Novo
     
     getUsuarios: (): Promise<Usuario[]> => apiRequest('/usuarios'),
     createUsuario: (usuario: Usuario): Promise<void> => apiRequest('/usuarios', 'POST', usuario),
@@ -156,6 +159,7 @@ const MockService = {
         route: { host: 'localhost', port: 1433, user: 'sa', pass: '', database: 'flexx', query: '', type: 'MSSQL' }
     }),
     updateIntegrationConfig: async () => {},
+    testDbConnection: async () => ({ success: true, message: 'Conexão MOCK OK!' }),
     getUsuarios: async (): Promise<Usuario[]> => ([{ ID_Usuario: 1, Nome: 'Admin Mock', Usuario: 'admin', Perfil: 'Admin', Ativo: true }]),
     createUsuario: async () => {},
     updateUsuario: async () => {},
@@ -195,7 +199,7 @@ export const {
     login,
     getSystemStatus, updateLicense,
     getSystemConfig, updateSystemConfig,
-    getIntegrationConfig, updateIntegrationConfig,
+    getIntegrationConfig, updateIntegrationConfig, testDbConnection,
     getUsuarios, createUsuario, updateUsuario,
     getColaboradores, createColaborador, updateColaborador, deleteColaborador, moveColaboradoresToGroup, bulkUpdateColaboradores, getImportPreview, syncColaboradores, getSugestoesVinculo,
     getFuelConfig, updateFuelConfig, getFuelConfigHistory,

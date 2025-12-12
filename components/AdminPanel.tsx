@@ -1,9 +1,10 @@
 
+
 import React, { useState, useContext, useEffect } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { GestaoUsuarios } from './GestaoUsuarios.tsx';
 import { CogIcon, UserGroupIcon, PhotographIcon, CheckCircleIcon, DocumentReportIcon, SpinnerIcon, ExclamationIcon, UploadIcon, UsersIcon, LocationMarkerIcon } from './icons.tsx';
-import { getCurrentMode, toggleMode, getSystemStatus, updateLicense, getIntegrationConfig, updateIntegrationConfig } from '../services/apiService.ts';
+import { getCurrentMode, toggleMode, getSystemStatus, updateLicense, getIntegrationConfig, updateIntegrationConfig, testDbConnection } from '../services/apiService.ts';
 import { LicenseStatus, IntegrationConfig, DbConnectionConfig } from '../types.ts';
 
 const LicenseControl: React.FC = () => {
@@ -56,6 +57,22 @@ const DbForm: React.FC<{
     icon: React.ReactNode;
     queryPlaceholder?: string;
 }> = ({ config, onChange, label, description, icon, queryPlaceholder }) => {
+    const [testing, setTesting] = useState(false);
+    const [testResult, setTestResult] = useState<{success: boolean, message: string} | null>(null);
+
+    const handleTest = async () => {
+        setTesting(true);
+        setTestResult(null);
+        try {
+            const res = await testDbConnection(config);
+            setTestResult(res);
+        } catch (e: any) {
+            setTestResult({ success: false, message: e.message });
+        } finally {
+            setTesting(false);
+        }
+    };
+
     return (
         <div>
             <div className="flex items-center mb-4">
@@ -89,7 +106,7 @@ const DbForm: React.FC<{
                 </div>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-1 mb-4">
                 <label className="block text-xs font-bold text-slate-500 uppercase">Query de Seleção</label>
                 <textarea 
                     value={config.query} 
@@ -97,6 +114,23 @@ const DbForm: React.FC<{
                     className="w-full h-32 bg-slate-800 text-green-400 border border-slate-700 rounded-lg p-3 font-mono text-xs outline-none focus:ring-1 focus:ring-green-500"
                     placeholder={queryPlaceholder || "SELECT ..."}
                 />
+            </div>
+
+            <div className="flex items-center justify-between">
+                 <button 
+                    onClick={handleTest} 
+                    disabled={testing}
+                    className="text-sm font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-lg transition-colors flex items-center"
+                >
+                    {testing ? <SpinnerIcon className="w-4 h-4 mr-2"/> : null}
+                    Testar Conexão
+                </button>
+                {testResult && (
+                    <span className={`text-sm font-bold ${testResult.success ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {testResult.success ? <CheckCircleIcon className="w-5 h-5 inline mr-1"/> : <ExclamationIcon className="w-5 h-5 inline mr-1"/>}
+                        {testResult.message}
+                    </span>
+                )}
             </div>
         </div>
     );
