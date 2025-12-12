@@ -1,13 +1,13 @@
 
-
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { getVisitasPrevistas } from '../services/apiService.ts';
-import { VisitaPrevista, RotaCalculada } from '../types.ts';
-import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, CalendarIcon, UsersIcon, ChevronRightIcon, ChevronDownIcon, XCircleIcon, ArrowLeftIcon, CogIcon, CarIcon, TruckIcon, UserGroupIcon, UserIcon } from './icons.tsx';
+import { VisitaPrevista } from '../types.ts';
+import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, UsersIcon, ChevronRightIcon, ChevronDownIcon, ArrowLeftIcon, UserGroupIcon, UserIcon, PrinterIcon } from './icons.tsx';
 import L from 'leaflet';
 
-// Fix Leaflet Icons
+// --- CONFIGURAÇÃO GLOBAL LEAFLET ---
+// Corrige ícones padrão que somem no build
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
@@ -15,66 +15,69 @@ L.Icon.Default.mergeOptions({
     shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
 
-// Componente para auto-zoom
-const MapRecenter: React.FC<{ coords: [number, number][] }> = ({ coords }) => {
-    const map = useMap();
-    useEffect(() => {
-        if (coords.length > 0) {
-            const bounds = L.latLngBounds(coords);
-            map.fitBounds(bounds, { padding: [50, 50] });
-        }
-    }, [coords, map]);
-    return null;
-};
+// --- SUB-COMPONENTES DO MAPA ---
 
-// Componente CRÍTICO: ResizeObserver e Intervalos para garantir renderização
-const MapFix = () => {
+// 1. Corretor de Renderização (Force Resize)
+const MapInvalidator = () => {
     const map = useMap();
     
     useEffect(() => {
-        const trigger = () => {
-            map.invalidateSize({ pan: false });
+        // Função que força o Leaflet a recalcular o tamanho do container
+        const resize = () => {
+            if (map) {
+                map.invalidateSize({ pan: false });
+            }
         };
 
-        // 1. Executa imediatamente
-        trigger();
+        // Executa imediatamente
+        resize();
 
-        // 2. Observer de redimensionamento do container
-        const container = map.getContainer();
-        const observer = new ResizeObserver(() => {
-            trigger();
-        });
-        observer.observe(container);
+        // Executa em intervalos curtos para pegar animações de abertura
+        const interval = setInterval(resize, 200);
+        
+        // Para após 2 segundos (tempo suficiente para animações terminarem)
+        const timeout = setTimeout(() => clearInterval(interval), 2000);
 
-        // 3. Intervalo de segurança para pegar o final de animações (100ms durante 1.5s)
-        // Isso corrige o problema de tiles cinzas quando o modal abre com transição
-        const interval = setInterval(trigger, 100);
-        const timeout = setTimeout(() => clearInterval(interval), 1500);
+        // Observer para mudanças de tamanho da janela
+        window.addEventListener('resize', resize);
 
         return () => {
-            observer.disconnect();
             clearInterval(interval);
             clearTimeout(timeout);
+            window.removeEventListener('resize', resize);
         };
     }, [map]);
 
     return null;
 };
 
-// Haversine Formula (km)
+// 2. Centralizador Automático (Auto Zoom)
+const MapAutoFit: React.FC<{ points: VisitaPrevista[] }> = ({ points }) => {
+    const map = useMap();
+    
+    useEffect(() => {
+        if (points.length > 0) {
+            const bounds = L.latLngBounds(points.map(p => [p.Lat, p.Long]));
+            // Adiciona padding para os marcadores não ficarem colados na borda
+            map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
+        }
+    }, [points, map]);
+
+    return null;
+};
+
+// --- FUNÇÕES UTILITÁRIAS ---
 const calcDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; 
-    const dLat = deg2rad(lat2 - lat1);
-    const dLon = deg2rad(lon2 - lon1);
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLon = (lon2 - lon1) * (Math.PI / 180);
     const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+              Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
               Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 };
-const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
-// Helper seguro para formatar data DD/MM/YYYY
 const formatDateString = (isoDateStr: string) => {
     if (!isoDateStr) return '-';
     const cleanDate = isoDateStr.split('T')[0];
@@ -82,54 +85,29 @@ const formatDateString = (isoDateStr: string) => {
     return `${d}/${m}/${y}`;
 };
 
-// Helper para extrair YYYY-MM-DD seguro
-const getSafeDateKey = (isoDateStr: string) => {
-    if (!isoDateStr) return '';
-    return isoDateStr.split('T')[0];
-};
-
-interface DayRouteSummary {
-    date: string;
-    dayName: string;
-    kmReta: number;
-    kmEstimado: number;
-    visitas: VisitaPrevista[];
-}
-
-interface SellerSummary {
-    id: number;
-    name: string;
-    supervisorId: number;
-    supervisor: string;
-    totalKm: number;
-    days: DayRouteSummary[];
-}
-
+// --- COMPONENTE PRINCIPAL ---
 export const Roteirizador: React.FC = () => {
-    // State Inputs
+    // Estados de Filtro
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0]);
-    const [tortuosityFactor, setTortuosityFactor] = useState(1.3); // Padrão Urbano
-    
-    // Filters State
+    const [tortuosityFactor, setTortuosityFactor] = useState(1.3);
     const [selectedSupervisor, setSelectedSupervisor] = useState<string>('');
     const [selectedVendedor, setSelectedVendedor] = useState<string>('');
 
-    // Data State
+    // Estados de Dados
     const [loading, setLoading] = useState(false);
     const [rawData, setRawData] = useState<VisitaPrevista[]>([]);
-    
-    // UI State
     const [expandedSellers, setExpandedSellers] = useState<Set<number>>(new Set());
-    const [viewingRoute, setViewingRoute] = useState<DayRouteSummary | null>(null);
+    
+    // Estado de Visualização do Mapa
+    const [viewingRoute, setViewingRoute] = useState<any | null>(null);
+    const [mapReady, setMapReady] = useState(false); // Delay para montagem
 
-    // Fetch Data
+    // Carregar Dados
     const handleCalculate = async () => {
         setLoading(true);
         setRawData([]);
         setViewingRoute(null);
-        setExpandedSellers(new Set());
-        
         try {
             const data = await getVisitasPrevistas(startDate, endDate);
             setRawData(data);
@@ -140,336 +118,329 @@ export const Roteirizador: React.FC = () => {
         }
     };
 
-    // Derived Lists for Dropdowns
-    const availableSupervisors = useMemo(() => {
-        const unique = new Map<number, string>();
-        rawData.forEach(v => {
-            if (v.Cod_Supervisor && v.Nome_Supervisor) {
-                unique.set(v.Cod_Supervisor, v.Nome_Supervisor);
-            }
-        });
-        return Array.from(unique.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    // Listas para Dropdowns
+    const supervisors = useMemo(() => {
+        const map = new Map();
+        rawData.forEach(v => map.set(v.Cod_Supervisor, v.Nome_Supervisor));
+        return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
     }, [rawData]);
 
-    const availableVendedores = useMemo(() => {
-        const unique = new Map<number, string>();
+    const sellers = useMemo(() => {
+        const map = new Map();
         rawData.forEach(v => {
-            if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return;
-            if (v.Cod_Vend && v.Nome_Vendedor) {
-                unique.set(v.Cod_Vend, v.Nome_Vendedor);
+            if (!selectedSupervisor || String(v.Cod_Supervisor) === selectedSupervisor) {
+                map.set(v.Cod_Vend, v.Nome_Vendedor);
             }
         });
-        return Array.from(unique.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+        return Array.from(map.entries()).sort((a, b) => a[1].localeCompare(b[1]));
     }, [rawData, selectedSupervisor]);
 
-    useEffect(() => {
-        setSelectedVendedor('');
-    }, [selectedSupervisor]);
-
-    // Process Data (Filter & Group)
-    const reportData = useMemo(() => {
+    // Processamento dos Dados
+    const groupedData = useMemo(() => {
         if (rawData.length === 0) return [];
 
-        // 1. Filter Raw Data
+        // 1. Filtrar
         const filtered = rawData.filter(v => {
             if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return false;
             if (selectedVendedor && String(v.Cod_Vend) !== selectedVendedor) return false;
-            
-            if (v.Data_da_Visita) {
-                const rowDate = getSafeDateKey(v.Data_da_Visita);
-                if (rowDate < startDate || rowDate > endDate) return false;
-            }
-
             return true;
         });
 
-        // 2. Group by Seller
-        const sellerMap = new Map<number, VisitaPrevista[]>();
+        // 2. Agrupar por Vendedor
+        const sellerMap = new Map();
         filtered.forEach(v => {
-            if (!sellerMap.has(v.Cod_Vend)) sellerMap.set(v.Cod_Vend, []);
-            sellerMap.get(v.Cod_Vend)?.push(v);
+            if (!sellerMap.has(v.Cod_Vend)) {
+                sellerMap.set(v.Cod_Vend, {
+                    id: v.Cod_Vend,
+                    name: v.Nome_Vendedor,
+                    supervisor: v.Nome_Supervisor,
+                    days: new Map() // Agrupar por dia
+                });
+            }
+            const seller = sellerMap.get(v.Cod_Vend);
+            const dateKey = v.Data_da_Visita?.split('T')[0];
+            if (dateKey) {
+                if (!seller.days.has(dateKey)) seller.days.set(dateKey, []);
+                seller.days.get(dateKey).push(v);
+            }
         });
 
-        const summaries: SellerSummary[] = [];
+        // 3. Calcular Rotas por Dia
+        const result = [];
+        for (const seller of sellerMap.values()) {
+            const daysArr = [];
+            let totalKm = 0;
 
-        // 3. Process Grouped Data
-        for (const [sellerId, visits] of sellerMap.entries()) {
-            const daysMap = new Map<string, VisitaPrevista[]>();
-            
-            visits.forEach(v => {
-                if (!v.Data_da_Visita) return;
-                const dateKey = getSafeDateKey(v.Data_da_Visita);
-                if (!dateKey) return;
-                
-                if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
-                daysMap.get(dateKey)?.push(v);
-            });
-
-            const daysSummary: DayRouteSummary[] = [];
-            let totalSellerKm = 0;
-
-            for (const [dateKey, dayVisits] of daysMap.entries()) {
-                const validPoints = dayVisits.filter(v => 
-                    v.Lat && v.Long && 
-                    !isNaN(Number(v.Lat)) && 
-                    !isNaN(Number(v.Long)) && 
-                    Number(v.Lat) !== 0 && 
-                    Number(v.Long) !== 0
-                );
-                
+            for (const [date, visits] of seller.days.entries()) {
+                const validPoints = (visits as VisitaPrevista[]).filter(p => p.Lat && p.Long && p.Lat !== 0);
                 let kmReta = 0;
+                
+                // Ordenar visitas? Por enquanto assume ordem do banco ou inserção
+                // Idealmente teria um horário ou sequência.
+                
                 for (let i = 0; i < validPoints.length - 1; i++) {
                     kmReta += calcDistance(validPoints[i].Lat, validPoints[i].Long, validPoints[i+1].Lat, validPoints[i+1].Long);
                 }
+                const kmEst = kmReta * tortuosityFactor;
+                totalKm += kmEst;
 
-                const kmEstimado = kmReta * tortuosityFactor;
-                totalSellerKm += kmEstimado;
-
-                daysSummary.push({
-                    date: dateKey,
-                    dayName: dayVisits[0]?.Dia_Semana || '',
-                    kmReta,
-                    kmEstimado,
-                    visitas: validPoints
+                daysArr.push({
+                    date: date,
+                    dayName: visits[0].Dia_Semana,
+                    km: kmEst,
+                    points: validPoints
                 });
             }
+            
+            // Ordenar dias
+            daysArr.sort((a, b) => a.date.localeCompare(b.date));
 
-            daysSummary.sort((a, b) => a.date.localeCompare(b.date));
-
-            summaries.push({
-                id: sellerId,
-                name: visits[0]?.Nome_Vendedor || 'Desconhecido',
-                supervisorId: visits[0]?.Cod_Supervisor || 0,
-                supervisor: visits[0]?.Nome_Supervisor || '-',
-                totalKm: totalSellerKm,
-                days: daysSummary
+            result.push({
+                ...seller,
+                totalKm: totalKm,
+                days: daysArr
             });
         }
 
-        return summaries.sort((a, b) => a.name.localeCompare(b.name));
-    }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor, startDate, endDate]);
+        return result.sort((a, b) => a.name.localeCompare(b.name));
+    }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor]);
 
-    const toggleExpand = (id: number) => {
-        const newSet = new Set(expandedSellers);
-        if (newSet.has(id)) newSet.delete(id);
-        else newSet.add(id);
-        setExpandedSellers(newSet);
+    // Handlers
+    const openMap = (dayRoute: any) => {
+        setViewingRoute(dayRoute);
+        setMapReady(false);
+        // Pequeno delay para garantir que o container do mapa renderizou no DOM antes de iniciar o Leaflet
+        setTimeout(() => setMapReady(true), 100);
+    };
+
+    const closeMap = () => {
+        setViewingRoute(null);
+        setMapReady(false);
     };
 
     // --- RENDER ---
 
-    // View: Map Modal
+    // 1. VISÃO DO MAPA (MODAL FULLSCREEN)
     if (viewingRoute) {
-        const hasPoints = viewingRoute.visitas.length > 0;
-        const centerPos: [number, number] = hasPoints 
-            ? [viewingRoute.visitas[0].Lat, viewingRoute.visitas[0].Long] 
-            : [-23.55052, -46.633308];
-
         return (
-            // Removido animate-fade-in do container principal do mapa para evitar conflitos de layout
-            <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
-                <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 z-10 shrink-0">
-                    <button 
-                        onClick={() => setViewingRoute(null)}
-                        className="flex items-center text-slate-600 hover:text-blue-600 font-bold text-sm bg-white px-3 py-1.5 rounded-lg border border-slate-300 shadow-sm"
-                    >
-                        <ArrowLeftIcon className="w-4 h-4 mr-2"/> Voltar ao Relatório
-                    </button>
-                    <div className="text-center">
-                        <h3 className="font-bold text-slate-800">{formatDateString(viewingRoute.date)} - {viewingRoute.dayName}</h3>
-                        <p className="text-xs text-slate-500">{viewingRoute.visitas.length} Pontos de Visita • {viewingRoute.kmEstimado.toFixed(1)} km est.</p>
-                    </div>
-                    <div className="w-20"></div>
-                </div>
-                
-                {/* Container do Mapa: Altura fixa 70vh garante espaço */}
-                <div className="w-full h-[70vh] bg-slate-100 relative z-0">
-                    <MapContainer 
-                        key={viewingRoute.date}
-                        center={centerPos} 
-                        zoom={13} 
-                        style={{ height: '100%', width: '100%' }}
-                    >
-                        <MapFix />
-                        <TileLayer 
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
-                        />
-                        <MapRecenter coords={viewingRoute.visitas.map(v => [v.Lat, v.Long])} />
-                        
-                        {viewingRoute.visitas.map((v, idx) => (
-                            <Marker key={idx} position={[v.Lat, v.Long]}>
-                                <Popup>
-                                    <div className="text-xs font-sans">
-                                        <strong className="block text-sm mb-1">{idx + 1}. {v.Razao_Social}</strong>
-                                        <span className="text-slate-500 block">{v.Endereco}</span>
-                                        <span className="text-slate-400 block">{v.Bairro}, {v.Cidade}</span>
-                                    </div>
-                                </Popup>
-                            </Marker>
-                        ))}
+            <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col">
+                {/* INJECTION DE ESTILO CRÍTICO PARA CORRIGIR O TAILWIND QUEBRANDO O MAPA */}
+                <style>{`
+                    .leaflet-pane img, 
+                    .leaflet-tile, 
+                    .leaflet-marker-icon, 
+                    .leaflet-marker-shadow {
+                        max-width: none !important;
+                        max-height: none !important;
+                        width: auto !important;
+                        height: auto !important;
+                    }
+                    .leaflet-container {
+                        width: 100%;
+                        height: 100%;
+                    }
+                `}</style>
 
-                        <Polyline 
-                            positions={viewingRoute.visitas.map(v => [v.Lat, v.Long])}
-                            color="#2563eb"
-                            weight={4}
-                            opacity={0.8}
-                            dashArray="5, 10"
-                        />
-                    </MapContainer>
+                {/* Header do Mapa */}
+                <div className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm shrink-0 h-20">
+                    <div className="flex items-center">
+                        <button onClick={closeMap} className="mr-4 p-2 hover:bg-slate-100 rounded-full transition text-slate-500 hover:text-slate-800">
+                            <ArrowLeftIcon className="w-6 h-6"/>
+                        </button>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-800 flex items-center">
+                                <span className="mr-2">{formatDateString(viewingRoute.date)}</span>
+                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-blue-100 text-blue-700 uppercase">{viewingRoute.dayName}</span>
+                            </h2>
+                            <p className="text-sm text-slate-500">
+                                {viewingRoute.points.length} Pontos • {viewingRoute.km.toFixed(1)} km estimados
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex gap-2">
+                        <button onClick={() => window.print()} className="bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 font-bold py-2 px-4 rounded-lg text-sm flex items-center">
+                            <PrinterIcon className="w-4 h-4 mr-2"/> Imprimir
+                        </button>
+                        <button onClick={closeMap} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg text-sm shadow-md">
+                            Fechar Mapa
+                        </button>
+                    </div>
+                </div>
+
+                {/* Container do Mapa */}
+                <div className="flex-1 relative bg-slate-200">
+                    {!mapReady && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-slate-100 z-10">
+                            <SpinnerIcon className="w-10 h-10 text-blue-500"/>
+                            <span className="ml-3 text-slate-500 font-bold">Carregando Mapa...</span>
+                        </div>
+                    )}
+                    
+                    {mapReady && (
+                        <MapContainer 
+                            center={[-23.55052, -46.633308]} 
+                            zoom={10} 
+                            style={{ height: '100%', width: '100%' }}
+                        >
+                            <MapInvalidator />
+                            <TileLayer 
+                                attribution='&copy; OpenStreetMap contributors'
+                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+                            />
+                            
+                            <MapAutoFit points={viewingRoute.points} />
+
+                            {/* Marcadores */}
+                            {viewingRoute.points.map((p: VisitaPrevista, idx: number) => (
+                                <Marker key={idx} position={[p.Lat, p.Long]}>
+                                    <Popup>
+                                        <div className="text-sm">
+                                            <strong>{idx + 1}. {p.Razao_Social}</strong><br/>
+                                            <span className="text-slate-500">{p.Endereco}</span><br/>
+                                            <span className="text-xs text-slate-400">{p.Bairro} - {p.Cidade}</span>
+                                        </div>
+                                    </Popup>
+                                </Marker>
+                            ))}
+
+                            {/* Linha da Rota */}
+                            <Polyline 
+                                positions={viewingRoute.points.map((p: any) => [p.Lat, p.Long])}
+                                color="#2563eb"
+                                weight={4}
+                                opacity={0.8}
+                                dashArray="10, 10"
+                            />
+                        </MapContainer>
+                    )}
                 </div>
             </div>
         );
     }
 
-    // View: Report
+    // 2. VISÃO DE RELATÓRIO (PADRÃO)
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-end">
                 <div>
-                    <h2 className="text-3xl font-extrabold text-slate-800 mb-1 tracking-tight">Previsão de Roteiro (KM)</h2>
-                    <p className="text-slate-500 font-medium text-sm">Cálculo de quilometragem baseado na agenda de visitas do sistema.</p>
+                    <h2 className="text-3xl font-extrabold text-slate-800 mb-1 tracking-tight">Roteirizador</h2>
+                    <p className="text-slate-500 font-medium">Previsão de quilometragem baseada na agenda de visitas.</p>
                 </div>
             </div>
 
-            {/* Config & Filter Bar */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
-                {/* Linha 1: Parâmetros de Cálculo */}
-                <div className="flex flex-wrap gap-4 items-end pb-4 border-b border-slate-100">
-                    <div className="flex gap-4">
-                        <div className="w-36">
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data Início</label>
-                            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-600"/>
-                        </div>
-                        <div className="w-36">
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Data Fim</label>
-                            <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-600"/>
-                        </div>
+            {/* Card de Filtros */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex flex-wrap gap-4 items-end">
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Início</label>
+                        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm"/>
                     </div>
-
-                    <div className="flex flex-col">
-                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1" title="Fator de ajuste de curvatura">Fator Tortuosidade</label>
-                        <div className="flex items-center bg-slate-50 border border-slate-300 rounded-lg p-1">
-                            <button onClick={() => setTortuosityFactor(1.1)} className={`px-3 py-1.5 rounded text-xs font-bold transition ${tortuosityFactor === 1.1 ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Rodovia</button>
-                            <button onClick={() => setTortuosityFactor(1.3)} className={`px-3 py-1.5 rounded text-xs font-bold transition ${tortuosityFactor === 1.3 ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Urbano</button>
-                            <input type="number" step="0.1" value={tortuosityFactor} onChange={e => setTortuosityFactor(parseFloat(e.target.value))} className="w-14 bg-transparent text-center text-sm font-mono font-bold outline-none border-l border-slate-200 ml-1"/>
-                        </div>
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fim</label>
+                        <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm"/>
                     </div>
-
+                    <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fator Tortuosidade</label>
+                        <input type="number" step="0.1" value={tortuosityFactor} onChange={e => setTortuosityFactor(parseFloat(e.target.value))} className="bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-sm w-24"/>
+                    </div>
                     <button 
-                        onClick={handleCalculate}
+                        onClick={handleCalculate} 
                         disabled={loading}
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md transition-all flex items-center disabled:opacity-50 ml-auto"
+                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md flex items-center transition"
                     >
                         {loading ? <SpinnerIcon className="w-5 h-5 mr-2"/> : <CalculatorIcon className="w-5 h-5 mr-2"/>}
-                        Calcular Previsão
+                        Calcular
                     </button>
                 </div>
 
-                {/* Linha 2: Filtros de Resultado (Só aparece após busca) */}
-                <div className={`flex flex-wrap gap-4 items-center transition-opacity duration-300 ${rawData.length > 0 ? 'opacity-100' : 'opacity-50 pointer-events-none'}`}>
-                    <div className="w-64">
-                         <label className="block text-xs font-bold text-slate-400 uppercase mb-1 flex items-center"><UserGroupIcon className="w-3 h-3 mr-1"/> Filtrar Supervisor</label>
-                         <select 
-                            value={selectedSupervisor} 
-                            onChange={e => setSelectedSupervisor(e.target.value)} 
-                            disabled={rawData.length === 0}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">Todos os Supervisores</option>
-                            {availableSupervisors.map(([id, name]) => (
-                                <option key={id} value={id}>{id} - {name}</option>
-                            ))}
-                         </select>
-                    </div>
-
-                    <div className="w-64">
-                         <label className="block text-xs font-bold text-slate-400 uppercase mb-1 flex items-center"><UserIcon className="w-3 h-3 mr-1"/> Filtrar Vendedor</label>
-                         <select 
-                            value={selectedVendedor} 
-                            onChange={e => setSelectedVendedor(e.target.value)} 
-                            disabled={rawData.length === 0}
-                            className="w-full bg-white border border-slate-300 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">Todos os Vendedores</option>
-                            {availableVendedores.map(([id, name]) => (
-                                <option key={id} value={id}>{id} - {name}</option>
-                            ))}
-                         </select>
-                    </div>
-
-                    {rawData.length > 0 && (
-                        <div className="ml-auto text-xs text-slate-400 font-mono">
-                            Exibindo {reportData.length} de {new Set(rawData.map(r => r.Cod_Vend)).size} vendedores
+                {/* Filtros Secundários */}
+                {rawData.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-slate-100 flex gap-4">
+                        <div className="w-64">
+                            <label className="block text-xs font-bold text-slate-400 uppercase mb-1 flex items-center"><UserGroupIcon className="w-3 h-3 mr-1"/> Supervisor</label>
+                            <select value={selectedSupervisor} onChange={e => setSelectedSupervisor(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-sm">
+                                <option value="">Todos</option>
+                                {supervisors.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                            </select>
                         </div>
-                    )}
-                </div>
+                        <div className="w-64">
+                            <label className="block text-xs font-bold text-slate-400 uppercase mb-1 flex items-center"><UserIcon className="w-3 h-3 mr-1"/> Vendedor</label>
+                            <select value={selectedVendedor} onChange={e => setSelectedVendedor(e.target.value)} className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 text-sm">
+                                <option value="">Todos</option>
+                                {sellers.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                )}
             </div>
 
-            {/* Results Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden animate-fade-in-up">
+            {/* Tabela de Resultados */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <table className="w-full text-sm text-left text-slate-600">
                     <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs border-b border-slate-200">
                         <tr>
                             <th className="p-4 w-10"></th>
                             <th className="p-4">Vendedor</th>
-                            <th className="p-4">Supervisor</th>
                             <th className="p-4 text-center">Dias com Rota</th>
                             <th className="p-4 text-right">KM Total Previsto</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {reportData.length === 0 ? (
-                            <tr><td colSpan={5} className="p-12 text-center text-slate-400">
-                                {rawData.length > 0 ? "Nenhum resultado para os filtros selecionados." : "Nenhuma rota calculada. Selecione o período e clique em Calcular."}
+                        {groupedData.length === 0 ? (
+                            <tr><td colSpan={4} className="p-12 text-center text-slate-400">
+                                {loading ? "Calculando..." : "Nenhum resultado encontrado."}
                             </td></tr>
                         ) : (
-                            reportData.map(seller => {
+                            groupedData.map(seller => {
                                 const isExpanded = expandedSellers.has(seller.id);
                                 return (
                                     <React.Fragment key={seller.id}>
-                                        <tr onClick={() => toggleExpand(seller.id)} className={`cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}>
+                                        <tr 
+                                            onClick={() => {
+                                                const newSet = new Set(expandedSellers);
+                                                if (newSet.has(seller.id)) newSet.delete(seller.id);
+                                                else newSet.add(seller.id);
+                                                setExpandedSellers(newSet);
+                                            }}
+                                            className={`cursor-pointer hover:bg-slate-50 transition ${isExpanded ? 'bg-slate-50' : ''}`}
+                                        >
                                             <td className="p-4 text-center">
                                                 {isExpanded ? <ChevronDownIcon className="w-4 h-4 text-blue-500"/> : <ChevronRightIcon className="w-4 h-4 text-slate-400"/>}
                                             </td>
                                             <td className="p-4">
-                                                <div className="font-bold text-slate-800">{seller.id} - {seller.name}</div>
-                                            </td>
-                                            <td className="p-4">
-                                                <div className="text-slate-600">{seller.supervisorId} - {seller.supervisor}</div>
+                                                <div className="font-bold text-slate-800">{seller.name}</div>
+                                                <div className="text-xs text-slate-500">{seller.supervisor}</div>
                                             </td>
                                             <td className="p-4 text-center font-mono">{seller.days.length}</td>
-                                            <td className="p-4 text-right font-bold text-blue-600 text-lg">{seller.totalKm.toFixed(1)} km</td>
+                                            <td className="p-4 text-right font-bold text-blue-600">{seller.totalKm.toFixed(1)} km</td>
                                         </tr>
-                                        
-                                        {/* Expanded Details */}
                                         {isExpanded && (
                                             <tr className="bg-slate-50/50 shadow-inner">
-                                                <td colSpan={5} className="p-0">
+                                                <td colSpan={4} className="p-0">
                                                     <div className="bg-white border-y border-slate-200">
                                                         <table className="w-full text-xs">
-                                                            <thead className="bg-slate-100 text-slate-500 uppercase">
+                                                            <thead className="bg-slate-100 text-slate-500">
                                                                 <tr>
-                                                                    <th className="py-2 px-8 text-left w-40">Data</th>
-                                                                    <th className="py-2 px-4 text-left">Dia Semana</th>
+                                                                    <th className="py-2 px-8 text-left">Data</th>
                                                                     <th className="py-2 px-4 text-center">Qtd Visitas</th>
-                                                                    <th className="py-2 px-4 text-right">KM Calculado <span className="text-[9px] lowercase opacity-70">(Fator {tortuosityFactor})</span></th>
-                                                                    <th className="py-2 px-4 text-center w-32">Ação</th>
+                                                                    <th className="py-2 px-4 text-right">KM Dia</th>
+                                                                    <th className="py-2 px-4 text-center">Ação</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody className="divide-y divide-slate-50">
-                                                                {seller.days.map((day, idx) => (
+                                                                {seller.days.map((day: any, idx: number) => (
                                                                     <tr key={idx} className="hover:bg-blue-50/30">
-                                                                        <td className="py-3 px-8 font-mono text-slate-700">{formatDateString(day.date)}</td>
-                                                                        <td className="py-3 px-4 text-slate-500 uppercase font-bold text-[10px]">{day.dayName}</td>
-                                                                        <td className="py-3 px-4 text-center font-bold">{day.visitas.length}</td>
-                                                                        <td className="py-3 px-4 text-right font-mono text-slate-700">{day.kmEstimado.toFixed(1)} km</td>
+                                                                        <td className="py-3 px-8 font-mono">
+                                                                            {formatDateString(day.date)} <span className="text-slate-400 ml-2 uppercase text-[10px]">{day.dayName}</span>
+                                                                        </td>
+                                                                        <td className="py-3 px-4 text-center font-bold">{day.points.length}</td>
+                                                                        <td className="py-3 px-4 text-right">{day.km.toFixed(1)} km</td>
                                                                         <td className="py-3 px-4 text-center">
                                                                             <button 
-                                                                                onClick={(e) => { e.stopPropagation(); setViewingRoute(day); }}
-                                                                                className="text-white bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-[10px] font-bold shadow-sm transition flex items-center justify-center mx-auto"
+                                                                                onClick={(e) => { e.stopPropagation(); openMap(day); }}
+                                                                                className="text-blue-600 hover:text-blue-800 font-bold bg-white border border-blue-200 px-3 py-1 rounded shadow-sm hover:shadow-md transition flex items-center mx-auto"
                                                                             >
-                                                                                <LocationMarkerIcon className="w-3 h-3 mr-1"/> Ver Rota
+                                                                                <LocationMarkerIcon className="w-3 h-3 mr-1"/> Ver Mapa
                                                                             </button>
                                                                         </td>
                                                                     </tr>
