@@ -279,8 +279,8 @@ export const Roteirizador: React.FC = () => {
                 
                 {/* 
                     FIX FINAL PARA MAPA:
-                    1. Altura Fixa (h-[70vh]) em vez de flex-1 para garantir que o container tenha tamanho.
-                    2. MapFix com ResizeObserver.
+                    1. Altura Fixa (h-[70vh]) em vez de flex-1 para garantir que o container tenha tamanho definido no DOM.
+                    2. MapFix com ResizeObserver para invalidar tamanho se mudar.
                     3. z-0 para contexto de empilhamento.
                 */}
                 <div className="w-full h-[70vh] bg-slate-100 relative z-0">

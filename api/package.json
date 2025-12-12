@@ -1,6 +1,6 @@
 {
   "name": "fuel360-api",
-  "version": "1.4.10",
+  "version": "1.4.11",
   "description": "API para o sistema de gestão Fuel360.",
   "main": "index.js",
   "scripts": {
