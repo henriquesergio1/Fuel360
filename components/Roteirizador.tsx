@@ -27,6 +27,18 @@ const MapRecenter: React.FC<{ coords: [number, number][] }> = ({ coords }) => {
     return null;
 };
 
+// Componente CRÍTICO para corrigir renderização em containers flex/modais
+const MapFix = () => {
+    const map = useMap();
+    useEffect(() => {
+        const timeout = setTimeout(() => {
+            map.invalidateSize();
+        }, 100); // Pequeno delay para garantir que o DOM pintou o container
+        return () => clearTimeout(timeout);
+    }, [map]);
+    return null;
+};
+
 // Haversine Formula (km)
 const calcDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; 
@@ -181,7 +193,14 @@ export const Roteirizador: React.FC = () => {
             let totalSellerKm = 0;
 
             for (const [dateKey, dayVisits] of daysMap.entries()) {
-                const validPoints = dayVisits.filter(v => v.Lat && v.Long && v.Lat !== 0 && v.Long !== 0);
+                // Ensure Lat/Long are numbers
+                const validPoints = dayVisits.filter(v => 
+                    v.Lat && v.Long && 
+                    !isNaN(Number(v.Lat)) && 
+                    !isNaN(Number(v.Long)) && 
+                    Number(v.Lat) !== 0 && 
+                    Number(v.Long) !== 0
+                );
                 
                 let kmReta = 0;
                 for (let i = 0; i < validPoints.length - 1; i++) {
@@ -226,6 +245,12 @@ export const Roteirizador: React.FC = () => {
 
     // View: Map Modal
     if (viewingRoute) {
+        // Garantir que temos pontos válidos para o centro
+        const hasPoints = viewingRoute.visitas.length > 0;
+        const centerPos: [number, number] = hasPoints 
+            ? [viewingRoute.visitas[0].Lat, viewingRoute.visitas[0].Long] 
+            : [-23.55052, -46.633308];
+
         return (
             <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative animate-fade-in">
                 <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 z-10">
@@ -243,17 +268,16 @@ export const Roteirizador: React.FC = () => {
                 </div>
                 
                 {/* 
-                    FIX: Leaflet container needs explicit height. 
-                    Adding min-h ensures it doesn't collapse if flex parent fails.
-                    Adding key forces remount when route changes.
+                    FIX: Leaflet container needs explicit height and MapFix component
                 */}
                 <div className="flex-1 relative z-0 w-full h-[calc(100vh-200px)] min-h-[500px]">
                     <MapContainer 
                         key={viewingRoute.date}
-                        center={[viewingRoute.visitas[0].Lat, viewingRoute.visitas[0].Long]} 
+                        center={centerPos} 
                         zoom={13} 
                         style={{ height: '100%', width: '100%' }}
                     >
+                        <MapFix />
                         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                         <MapRecenter coords={viewingRoute.visitas.map(v => [v.Lat, v.Long])} />
                         

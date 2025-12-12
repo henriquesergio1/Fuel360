@@ -1,3 +1,5 @@
+
+
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { Colaborador, TipoVeiculoReembolso, DiffItem } from '../types.ts';
@@ -9,11 +11,13 @@ const SyncAuditModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
     onSuccess: () => void;
-}> = ({ isOpen, onClose, onSuccess }) => {
+    validGroups: string[];
+}> = ({ isOpen, onClose, onSuccess, validGroups }) => {
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [error, setError] = useState('');
     const [previewData, setPreviewData] = useState<{novos: DiffItem[], alterados: DiffItem[], conflitos: DiffItem[], total: number} | null>(null);
+    const [ignoredData, setIgnoredData] = useState<{count: number, groups: string[]} | null>(null);
     const [selection, setSelection] = useState<Set<number>>(new Set());
     const [conflictResolutions, setConflictResolutions] = useState<Record<number, 'UPDATE_ID' | 'INSERT'>>({});
 
@@ -22,6 +26,7 @@ const SyncAuditModal: React.FC<{
             loadPreview();
         } else {
             setPreviewData(null);
+            setIgnoredData(null);
             setError('');
             setSelection(new Set());
             setConflictResolutions({});
@@ -31,20 +36,41 @@ const SyncAuditModal: React.FC<{
     const loadPreview = async () => {
         setLoading(true);
         setError('');
+        setIgnoredData(null);
         try {
             const data = await getImportPreview();
+            
+            // --- FILTRO DE GRUPOS VÁLIDOS ---
+            const allowedSet = new Set(validGroups);
+            const filteredNovos: DiffItem[] = [];
+            const ignoredGroups = new Set<string>();
+            let ignoredCount = 0;
+
+            data.novos.forEach(item => {
+                if (allowedSet.has(item.newData.grupo)) {
+                    filteredNovos.push(item);
+                } else {
+                    ignoredCount++;
+                    ignoredGroups.add(item.newData.grupo || 'Sem Grupo');
+                }
+            });
+
+            // Set Data
             setPreviewData({ 
-                novos: data.novos, 
+                novos: filteredNovos, 
                 alterados: data.alterados, 
                 conflitos: data.conflitos || [],
                 total: data.totalExternal 
             });
+
+            if (ignoredCount > 0) {
+                setIgnoredData({ count: ignoredCount, groups: Array.from(ignoredGroups) });
+            }
             
             // Selecionar tudo por padrão
             const allIds = new Set<number>();
-            data.novos.forEach(i => allIds.add(i.id_pulsus));
+            filteredNovos.forEach(i => allIds.add(i.id_pulsus));
             data.alterados.forEach(i => allIds.add(i.id_pulsus));
-            // Conflitos não selecionados por padrão, usuário deve decidir
             
             setSelection(allIds);
 
@@ -142,6 +168,26 @@ const SyncAuditModal: React.FC<{
                                     <CheckCircleIcon className="w-12 h-12 text-emerald-500 mx-auto mb-3"/>
                                     <h4 className="text-lg font-bold text-slate-700">Tudo Sincronizado!</h4>
                                     <p className="text-slate-500">Nenhuma diferença encontrada entre os bancos.</p>
+                                </div>
+                            )}
+
+                            {/* --- WARNING: REGISTROS IGNORADOS (Grupos Inexistentes) --- */}
+                            {ignoredData && (
+                                <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 animate-fade-in">
+                                    <div className="flex items-start">
+                                        <ExclamationIcon className="w-5 h-5 text-orange-600 mt-0.5 mr-3 shrink-0"/>
+                                        <div>
+                                            <h4 className="text-sm font-bold text-orange-800">Registros Ignorados: {ignoredData.count}</h4>
+                                            <p className="text-xs text-orange-700 mt-1">
+                                                Estes colaboradores têm grupos no banco externo que não foram criados no App. Crie a aba primeiro se quiser importá-los.
+                                            </p>
+                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                {ignoredData.groups.map(g => (
+                                                    <span key={g} className="bg-orange-100 text-orange-800 text-[10px] font-bold px-2 py-1 rounded border border-orange-200">{g}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
 
@@ -784,20 +830,7 @@ export const GestaoEquipe: React.FC = () => {
         
         try {
             if (bulkMode === 'GROUP') {
-                // Para Group, a API antiga nao aceita Reason, mas a nova sim se adaptassemos.
-                // Mas mantendo a logica, a API de move (old) gera log automatico.
-                // Porem, como agora temos reason, vamos usar a nova logica ou adaptar?
-                // O MoveGroupModal original nao pedia motivo. O novo Bulk pede.
-                // Vamos usar a API antiga moveColaboradores para manter compatibilidade ou a nova update-field?
-                // A API update-field nao suporta 'Grupo' no allowedFields.
-                // ENTAO: Para grupo, usamos a API antiga (que nao pede motivo explicito, loga 'Transferencia em massa').
-                // CORRECAO: O usuário pediu "precisa gravar auditoria". O ideal seria atualizar a API de move para aceitar motivo.
-                // Mas para nao quebrar, vou assumir que 'Transferencia em Massa' é log suficiente, ou injetar motivo no log.
-                // Visto que o modal agora PODE e DEVE enviar motivo, vamos usar a API de Move, mas passando motivo? Nao suporta.
-                // Vamos focar nos pedidos: Veiculo e Ativo.
-                
                 await moveColaboradores(ids, value);
-                // TODO: Adicionar log manual com o motivo se necessario, mas a API move ja loga.
             } else if (bulkMode === 'VEHICLE') {
                 await bulkUpdateColaboradores(ids, 'TipoVeiculo', value, reason);
             } else if (bulkMode === 'STATUS') {
@@ -816,7 +849,12 @@ export const GestaoEquipe: React.FC = () => {
         <div className="space-y-8">
             <ColaboradorModal isOpen={isColabModalOpen} onClose={() => setIsColabModalOpen(false)} colaborador={editingColab} initialGroup={activeTab} />
             {/* Modal de Auditoria e Sincronização */}
-            <SyncAuditModal isOpen={isImportModalOpen} onClose={() => setIsImportModalOpen(false)} onSuccess={refreshData} />
+            <SyncAuditModal 
+                isOpen={isImportModalOpen} 
+                onClose={() => setIsImportModalOpen(false)} 
+                onSuccess={refreshData}
+                validGroups={grupos} // Passa grupos válidos para filtro
+            />
             
             <GroupModal isOpen={isGroupModalOpen} onClose={() => setIsGroupModalOpen(false)} onSave={handleCreateGroup} />
             <DeleteConfirmationModal isOpen={!!colabToDelete} onClose={() => setColabToDelete(null)} onConfirm={confirmDelete} colabName={colabToDelete?.Nome || ''} />
