@@ -163,8 +163,7 @@ export const GestaoAusencias: React.FC = () => {
                             ausencias.map(aus => (
                                 <tr key={aus.ID_Ausencia} className="hover:bg-slate-50 transition-colors">
                                     <td className="p-5">
-                                        <div className="font-bold text-slate-800">{aus.NomeColaborador}</div>
-                                        <div className="text-xs text-slate-400">ID: {aus.ID_Pulsus}</div>
+                                        <div className="font-bold text-slate-800">{aus.ID_Pulsus} - {aus.NomeColaborador}</div>
                                     </td>
                                     <td className="p-5 font-mono text-slate-600">
                                         <div className="flex items-center">
@@ -212,7 +211,7 @@ export const GestaoAusencias: React.FC = () => {
                                 >
                                     <option value="">Selecione...</option>
                                     {colaboradores.sort((a,b) => a.Nome.localeCompare(b.Nome)).map(c => (
-                                        <option key={c.ID_Colaborador} value={c.ID_Colaborador}>{c.Nome} (ID: {c.ID_Pulsus})</option>
+                                        <option key={c.ID_Colaborador} value={c.ID_Colaborador}>{c.ID_Pulsus} - {c.Nome}</option>
                                     ))}
                                 </select>
                             </div>

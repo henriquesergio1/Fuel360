@@ -1,10 +1,4 @@
 
-
-
-
-
-
-
 import React, { useState, useEffect, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { getRelatorioReembolso, getRelatorioAnalitico, corrigirAusenciasHistorico } from '../services/apiService.ts';
@@ -195,7 +189,7 @@ export const Relatorios: React.FC = () => {
                         >
                             <option value="">Todos os Colaboradores</option>
                             {colaboradores.sort((a,b) => a.Nome.localeCompare(b.Nome)).map(c => (
-                                <option key={c.ID_Pulsus} value={c.ID_Pulsus}>{c.Nome}</option>
+                                <option key={c.ID_Pulsus} value={c.ID_Pulsus}>{c.ID_Pulsus} - {c.Nome}</option>
                             ))}
                         </select>
                     </div>
@@ -313,8 +307,8 @@ export const Relatorios: React.FC = () => {
                                                     <td className="p-4 text-xs font-mono">{new Date(item.DataGeracao).toLocaleDateString()}</td>
                                                     <td className="p-4 text-xs font-medium text-slate-500">{item.PeriodoReferencia}</td>
                                                     <td className="p-4">
-                                                        <div className="font-bold text-slate-800">{item.NomeColaborador}</div>
-                                                        <div className="text-[10px] text-slate-400">{item.Grupo} • ID: {item.ID_Pulsus}</div>
+                                                        <div className="font-bold text-slate-800">{item.ID_Pulsus} - {item.NomeColaborador}</div>
+                                                        <div className="text-[10px] text-slate-400">{item.Grupo}</div>
                                                     </td>
                                                     <td className="p-4 text-center">
                                                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${item.TipoVeiculo === 'Carro' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
@@ -360,9 +354,9 @@ export const Relatorios: React.FC = () => {
                                                                 </div>
                                                             </td>
                                                             <td className="p-4">
-                                                                <div className="font-bold text-slate-800 text-base">{group.info.NomeColaborador}</div>
+                                                                <div className="font-bold text-slate-800 text-base">{group.info.ID_Pulsus} - {group.info.NomeColaborador}</div>
                                                                 <div className="text-[10px] text-slate-500 font-medium">
-                                                                    ID: {group.info.ID_Pulsus} • {group.info.Grupo}
+                                                                    {group.info.Grupo}
                                                                 </div>
                                                                 {group.hasConflicts && (
                                                                     <div className="text-xs font-bold text-red-600 mt-1 flex items-center">

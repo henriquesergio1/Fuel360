@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../context/DataContext.tsx';
 import { UploadIcon, DropIcon, CarIcon, MotoIcon, PrinterIcon, ExclamationIcon, CheckCircleIcon, SpinnerIcon, DocumentReportIcon, CalculatorIcon, ChevronDownIcon, ChevronRightIcon, PencilIcon, ArrowRightIcon, CalendarIcon, UsersIcon, PlusCircleIcon, ChevronUpIcon } from './icons.tsx';
@@ -47,7 +45,7 @@ const EditKmModal: React.FC<{
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[60]">
             <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 w-full max-w-sm">
                 <h3 className="text-lg font-bold text-slate-900 mb-1">Ajuste Manual de KM</h3>
-                <p className="text-xs text-slate-500 mb-4">{record.nome} - {record.dataOriginal}</p>
+                <p className="text-xs text-slate-500 mb-4">{record.id_pulsus} - {record.nome} | {record.dataOriginal}</p>
                 
                 <div className="mb-4">
                     <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Novo KM</label>
@@ -118,7 +116,7 @@ const MergeModal: React.FC<{
                     >
                         <option value="">Selecione...</option>
                         {colaboradores.sort((a,b) => a.Nome.localeCompare(b.Nome)).map(c => (
-                            <option key={c.ID_Colaborador} value={c.ID_Colaborador}>{c.Nome} (ID: {c.ID_Pulsus})</option>
+                            <option key={c.ID_Colaborador} value={c.ID_Colaborador}>{c.ID_Pulsus} - {c.Nome}</option>
                         ))}
                     </select>
                 </div>
@@ -135,7 +133,7 @@ const MergeModal: React.FC<{
 // --- SUB-COMPONENTE: MODAL DE AUSÊNCIA RÁPIDA ---
 const QuickAbsenceModal: React.FC<{
     isOpen: boolean;
-    data: { colabId: number; name: string; date: string } | null;
+    data: { colabId: number; idPulsus: number; name: string; date: string } | null;
     onClose: () => void;
     onConfirm: (dtInicio: string, dtFim: string, motivo: string) => Promise<void>;
 }> = ({ isOpen, data, onClose, onConfirm }) => {
@@ -170,7 +168,7 @@ const QuickAbsenceModal: React.FC<{
                     <CalendarIcon className="w-6 h-6 text-red-500"/>
                 </div>
                 <h3 className="text-lg font-bold text-slate-900 text-center mb-1">Registrar Ausência</h3>
-                <p className="text-xs text-slate-500 text-center mb-6">Colaborador: <b>{data.name}</b></p>
+                <p className="text-xs text-slate-500 text-center mb-6">Colaborador: <b>{data.idPulsus} - {data.name}</b></p>
                 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                     <div>
@@ -258,8 +256,7 @@ const ReportPrint: React.FC<{ dados: CalculoReembolso[], periodo: string, onClos
                         {dados.map((item) => (
                             <tr key={item.Colaborador.ID_Pulsus} className="even:bg-slate-50 hover:bg-slate-100 transition-colors">
                                 <td className="border border-slate-300 p-3">
-                                    <div className="font-bold text-slate-800">{item.Colaborador.Nome}</div>
-                                    <div className="text-xs text-slate-500">ID: {item.Colaborador.ID_Pulsus}</div>
+                                    <div className="font-bold text-slate-800">{item.Colaborador.ID_Pulsus} - {item.Colaborador.Nome}</div>
                                 </td>
                                 <td className="border border-slate-300 p-3">
                                     <div className="font-medium text-slate-700">{item.Colaborador.Grupo}</div>
@@ -320,7 +317,7 @@ export const Importacao: React.FC = () => {
 
     // Quick Absence Modal
     const [absenceModalOpen, setAbsenceModalOpen] = useState(false);
-    const [targetQuickAbsence, setTargetQuickAbsence] = useState<{ colabId: number, name: string, date: string } | null>(null);
+    const [targetQuickAbsence, setTargetQuickAbsence] = useState<{ colabId: number, idPulsus: number, name: string, date: string } | null>(null);
 
     // Helper: Create Date from YYYY-MM-DD
     const createDateFromYmd = (ymd: string): Date => {
@@ -543,6 +540,7 @@ export const Importacao: React.FC = () => {
         if (!record.colaboradorRef) return;
         setTargetQuickAbsence({
             colabId: record.colaboradorRef.ID_Colaborador,
+            idPulsus: record.colaboradorRef.ID_Pulsus,
             name: record.nome,
             date: record.dataISO
         });
@@ -877,7 +875,7 @@ export const Importacao: React.FC = () => {
                                      <div>
                                          <p className="text-xs font-bold text-slate-700">ID Ignorado: {sug.id}</p>
                                          <p className="text-[10px] text-slate-500">Histórico: <b>{sug.nomeHist}</b> ({sug.grupoHist})</p>
-                                         <p className="text-[10px] text-blue-600 mt-1">Sugerido: <b>{sug.targetColab.Nome}</b> (ID Atual: {sug.targetColab.ID_Pulsus})</p>
+                                         <p className="text-[10px] text-blue-600 mt-1">Sugerido: <b>{sug.targetColab.ID_Pulsus} - {sug.targetColab.Nome}</b></p>
                                      </div>
                                      <button 
                                         onClick={() => handleMerge(sug.id, sug.targetColab.ID_Colaborador)}
@@ -960,8 +958,8 @@ export const Importacao: React.FC = () => {
                                                         {isExpanded ? <ChevronDownIcon className="w-4 h-4 text-blue-500"/> : <ChevronRightIcon className="w-4 h-4 text-slate-400"/>}
                                                     </td>
                                                     <td className="p-4">
-                                                        <div className="font-bold text-slate-800">{colab.Nome}</div>
-                                                        <div className="text-xs text-slate-400">ID: {idPulsus} • {colab.Grupo}</div>
+                                                        <div className="font-bold text-slate-800">{idPulsus} - {colab.Nome}</div>
+                                                        <div className="text-xs text-slate-400">{colab.Grupo}</div>
                                                     </td>
                                                     <td className="p-4 text-center font-mono">{records.length}</td>
                                                     <td className="p-4 text-right font-mono font-bold">{totalKm.toFixed(1)} km</td>
@@ -1078,7 +1076,7 @@ export const Importacao: React.FC = () => {
                         <tbody className="divide-y divide-slate-50">
                             {calculoFinal.map(c => (
                                 <tr key={c.Colaborador.ID_Pulsus}>
-                                    <td className="p-4 font-bold text-slate-800">{c.Colaborador.Nome}</td>
+                                    <td className="p-4 font-bold text-slate-800">{c.Colaborador.ID_Pulsus} - {c.Colaborador.Nome}</td>
                                     <td className="p-4 text-center">
                                         <span className={`px-2 py-0.5 rounded text-xs font-bold border ${c.Colaborador.TipoVeiculo === 'Carro' ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-amber-50 text-amber-600 border-amber-100'}`}>
                                             {c.Colaborador.TipoVeiculo}
