@@ -1,5 +1,6 @@
 
 
+
 const express = require('express');
 const cors = require('cors');
 const { Request, Connection } = require('tedious');
@@ -554,6 +555,18 @@ app.post('/ausencias/fix-history', authenticateToken, async (req, res) => {
 });
 
 // --- ROTEIRIZADOR (SQL Server Externo) ---
+// Função auxiliar para parsing seguro de coordenadas
+const parseCoordinate = (val) => {
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string') {
+        // Substitui vírgula por ponto (Locale PT-BR issue)
+        const clean = val.replace(',', '.').trim();
+        const num = parseFloat(clean);
+        return isNaN(num) ? 0 : num;
+    }
+    return 0;
+};
+
 app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
@@ -619,9 +632,9 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
                 Bairro: getVal(['BAIRRO']) || '',
                 Cidade: getVal(['CIDADE', 'MUNICIPIO']) || '',
                 CEP: getVal(['CEP']) || '',
-                // Força float para garantir que o Leaflet não receba string
-                Lat: parseFloat(getVal(['LAT', 'LATITUDE'])) || 0,
-                Long: parseFloat(getVal(['LONG', 'LONGITUDE', 'LNG'])) || 0
+                // CORREÇÃO CRÍTICA: Parsing seguro de coordenadas (Float/String com vírgula)
+                Lat: parseCoordinate(getVal(['LAT', 'LATITUDE'])),
+                Long: parseCoordinate(getVal(['LONG', 'LONGITUDE', 'LNG']))
             };
         });
 
