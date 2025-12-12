@@ -18,11 +18,17 @@ services:
       - API_PORT=3000
       - JWT_SECRET=${JWT_SECRET:-fuel360-secret-key-change-in-prod}
       
-      # Conexão Principal (Banco Fuel360)
+      # Conexão Principal (Banco Fuel360 - 10.10.10.100)
       - DB_SERVER_FUEL360=${DB_SERVER_FUEL360}
       - DB_DATABASE_FUEL360=${DB_DATABASE_FUEL360}
       - DB_USER_FUEL360=${DB_USER_FUEL360}
       - DB_PASSWORD_FUEL360=${DB_PASSWORD_FUEL360}
+
+      # Conexão Secundária (Banco Flexx - consulta.flagcloud.com.br)
+      - DB_SERVER_FLEXX=${DB_SERVER_FLEXX}
+      - DB_DATABASE_FLEXX=${DB_DATABASE_FLEXX:-FLEXX10071188}
+      - DB_USER_FLEXX=${DB_USER_FLEXX}
+      - DB_PASSWORD_FLEXX=${DB_PASSWORD_FLEXX}
 
   fuel360-frontend:
     build:
