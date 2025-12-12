@@ -41,17 +41,20 @@ const SyncAuditModal: React.FC<{
             const data = await getImportPreview();
             
             // --- FILTRO DE GRUPOS VÁLIDOS ---
-            const allowedSet = new Set(validGroups);
+            // Cria Set normalizado (uppercase) para comparação segura
+            const allowedSet = new Set(validGroups.map(g => g.trim().toUpperCase()));
             const filteredNovos: DiffItem[] = [];
             const ignoredGroups = new Set<string>();
             let ignoredCount = 0;
 
             data.novos.forEach(item => {
-                if (allowedSet.has(item.newData.grupo)) {
+                const itemGroup = item.newData.grupo ? item.newData.grupo.trim() : 'SEM GRUPO';
+                
+                if (allowedSet.has(itemGroup.toUpperCase())) {
                     filteredNovos.push(item);
                 } else {
                     ignoredCount++;
-                    ignoredGroups.add(item.newData.grupo || 'Sem Grupo');
+                    ignoredGroups.add(itemGroup);
                 }
             });
 
@@ -64,7 +67,7 @@ const SyncAuditModal: React.FC<{
             });
 
             if (ignoredCount > 0) {
-                setIgnoredData({ count: ignoredCount, groups: Array.from(ignoredGroups) });
+                setIgnoredData({ count: ignoredCount, groups: Array.from(ignoredGroups).sort() });
             }
             
             // Selecionar tudo por padrão

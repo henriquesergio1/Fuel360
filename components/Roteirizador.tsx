@@ -1,6 +1,6 @@
 
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { getVisitasPrevistas } from '../services/apiService.ts';
 import { VisitaPrevista, RotaCalculada } from '../types.ts';
@@ -18,7 +18,7 @@ L.Icon.Default.mergeOptions({
 // Componente para auto-zoom
 const MapRecenter: React.FC<{ coords: [number, number][] }> = ({ coords }) => {
     const map = useMap();
-    React.useEffect(() => {
+    useEffect(() => {
         if (coords.length > 0) {
             const bounds = L.latLngBounds(coords);
             map.fitBounds(bounds, { padding: [50, 50] });
@@ -27,19 +27,33 @@ const MapRecenter: React.FC<{ coords: [number, number][] }> = ({ coords }) => {
     return null;
 };
 
-// Componente CRÍTICO para corrigir renderização em containers flex/modais
+// Componente CRÍTICO: ResizeObserver para garantir que o mapa preencha o container
 const MapFix = () => {
     const map = useMap();
+    
     useEffect(() => {
-        // Executa imediatamente para tentar ajustar
+        // 1. Invalida tamanho imediatamente
         map.invalidateSize();
+
+        // 2. Monitora mudanças no container DOM
+        const container = map.getContainer();
+        const observer = new ResizeObserver(() => {
+            map.invalidateSize();
+        });
         
-        // Executa novamente após um delay maior para garantir que animações CSS terminaram
+        observer.observe(container);
+
+        // 3. Backup: Tenta novamente após um delay (animações CSS)
         const timeout = setTimeout(() => {
             map.invalidateSize();
-        }, 400); 
-        return () => clearTimeout(timeout);
+        }, 300);
+
+        return () => {
+            observer.disconnect();
+            clearTimeout(timeout);
+        };
     }, [map]);
+
     return null;
 };
 
@@ -56,10 +70,9 @@ const calcDistance = (lat1: number, lon1: number, lat2: number, lon2: number) =>
 };
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
-// Helper seguro para formatar data DD/MM/YYYY sem conversão de timezone (evita dia anterior)
+// Helper seguro para formatar data DD/MM/YYYY
 const formatDateString = (isoDateStr: string) => {
     if (!isoDateStr) return '-';
-    // Pega apenas a parte YYYY-MM-DD da string, ignorando hora/fuso
     const cleanDate = isoDateStr.split('T')[0];
     const [y, m, d] = cleanDate.split('-');
     return `${d}/${m}/${y}`;
@@ -137,9 +150,7 @@ export const Roteirizador: React.FC = () => {
     const availableVendedores = useMemo(() => {
         const unique = new Map<number, string>();
         rawData.forEach(v => {
-            // Se tiver filtro de supervisor, mostrar apenas vendedores daquele supervisor
             if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return;
-            
             if (v.Cod_Vend && v.Nome_Vendedor) {
                 unique.set(v.Cod_Vend, v.Nome_Vendedor);
             }
@@ -147,7 +158,6 @@ export const Roteirizador: React.FC = () => {
         return Array.from(unique.entries()).sort((a, b) => a[1].localeCompare(b[1]));
     }, [rawData, selectedSupervisor]);
 
-    // Reset Vendor filter if Supervisor changes
     useEffect(() => {
         setSelectedVendedor('');
     }, [selectedSupervisor]);
@@ -161,7 +171,6 @@ export const Roteirizador: React.FC = () => {
             if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return false;
             if (selectedVendedor && String(v.Cod_Vend) !== selectedVendedor) return false;
             
-            // Filter by Date (String comparison YYYY-MM-DD to avoid timezone shift)
             if (v.Data_da_Visita) {
                 const rowDate = getSafeDateKey(v.Data_da_Visita);
                 if (rowDate < startDate || rowDate > endDate) return false;
@@ -183,7 +192,6 @@ export const Roteirizador: React.FC = () => {
         for (const [sellerId, visits] of sellerMap.entries()) {
             const daysMap = new Map<string, VisitaPrevista[]>();
             
-            // Group by Date
             visits.forEach(v => {
                 if (!v.Data_da_Visita) return;
                 const dateKey = getSafeDateKey(v.Data_da_Visita);
@@ -197,7 +205,6 @@ export const Roteirizador: React.FC = () => {
             let totalSellerKm = 0;
 
             for (const [dateKey, dayVisits] of daysMap.entries()) {
-                // Ensure Lat/Long are numbers
                 const validPoints = dayVisits.filter(v => 
                     v.Lat && v.Long && 
                     !isNaN(Number(v.Lat)) && 
@@ -249,7 +256,6 @@ export const Roteirizador: React.FC = () => {
 
     // View: Map Modal
     if (viewingRoute) {
-        // Garantir que temos pontos válidos para o centro
         const hasPoints = viewingRoute.visitas.length > 0;
         const centerPos: [number, number] = hasPoints 
             ? [viewingRoute.visitas[0].Lat, viewingRoute.visitas[0].Long] 
@@ -257,7 +263,7 @@ export const Roteirizador: React.FC = () => {
 
         return (
             <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative animate-fade-in">
-                <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 z-10">
+                <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 z-10 shrink-0">
                     <button 
                         onClick={() => setViewingRoute(null)}
                         className="flex items-center text-slate-600 hover:text-blue-600 font-bold text-sm bg-white px-3 py-1.5 rounded-lg border border-slate-300 shadow-sm"
@@ -272,11 +278,12 @@ export const Roteirizador: React.FC = () => {
                 </div>
                 
                 {/* 
-                    FIX: Leaflet container needs explicit height. 
-                    Using 'flex-1' and 'min-h-0' is usually safer for flexbox children.
-                    MapFix component ensures invalidateSize is called.
+                    FIX FINAL PARA MAPA:
+                    1. Altura Fixa (h-[70vh]) em vez de flex-1 para garantir que o container tenha tamanho.
+                    2. MapFix com ResizeObserver.
+                    3. z-0 para contexto de empilhamento.
                 */}
-                <div className="flex-1 w-full relative min-h-0 bg-slate-100">
+                <div className="w-full h-[70vh] bg-slate-100 relative z-0">
                     <MapContainer 
                         key={viewingRoute.date}
                         center={centerPos} 
@@ -284,7 +291,10 @@ export const Roteirizador: React.FC = () => {
                         style={{ height: '100%', width: '100%' }}
                     >
                         <MapFix />
-                        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                        <TileLayer 
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
+                        />
                         <MapRecenter coords={viewingRoute.visitas.map(v => [v.Lat, v.Long])} />
                         
                         {viewingRoute.visitas.map((v, idx) => (
