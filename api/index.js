@@ -619,14 +619,13 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
                 Bairro: getVal(['BAIRRO']) || '',
                 Cidade: getVal(['CIDADE', 'MUNICIPIO']) || '',
                 CEP: getVal(['CEP']) || '',
-                Lat: getVal(['LAT', 'LATITUDE']) || 0,
-                Long: getVal(['LONG', 'LONGITUDE', 'LNG']) || 0
+                // Força float para garantir que o Leaflet não receba string
+                Lat: parseFloat(getVal(['LAT', 'LATITUDE'])) || 0,
+                Long: parseFloat(getVal(['LONG', 'LONGITUDE', 'LNG'])) || 0
             };
         });
 
         // Filtro de Segurança (Backend Side)
-        // Garante que os dados retornados estejam dentro do intervalo solicitado,
-        // caso a query SQL personalizada do usuário ignore os parâmetros @pStartDate e @pEndDate.
         const filteredRows = mappedRows.filter(r => {
             if (!r.Data_da_Visita) return false;
             try {

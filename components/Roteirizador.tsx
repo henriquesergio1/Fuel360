@@ -242,8 +242,18 @@ export const Roteirizador: React.FC = () => {
                     <div className="w-20"></div>
                 </div>
                 
-                <div className="flex-1 relative z-0">
-                    <MapContainer center={[viewingRoute.visitas[0].Lat, viewingRoute.visitas[0].Long]} zoom={13} style={{ height: '100%', width: '100%' }}>
+                {/* 
+                    FIX: Leaflet container needs explicit height. 
+                    Adding min-h ensures it doesn't collapse if flex parent fails.
+                    Adding key forces remount when route changes.
+                */}
+                <div className="flex-1 relative z-0 w-full h-[calc(100vh-200px)] min-h-[500px]">
+                    <MapContainer 
+                        key={viewingRoute.date}
+                        center={[viewingRoute.visitas[0].Lat, viewingRoute.visitas[0].Long]} 
+                        zoom={13} 
+                        style={{ height: '100%', width: '100%' }}
+                    >
                         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                         <MapRecenter coords={viewingRoute.visitas.map(v => [v.Lat, v.Long])} />
                         
