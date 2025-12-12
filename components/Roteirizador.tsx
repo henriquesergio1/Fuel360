@@ -7,7 +7,6 @@ import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, ChevronRightIcon, Chev
 import L from 'leaflet';
 
 // --- CONFIGURAÇÃO GLOBAL LEAFLET ---
-// Hack para corrigir ícones do Leaflet que somem ao usar bundlers
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
@@ -15,16 +14,15 @@ L.Icon.Default.mergeOptions({
     shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
 });
 
-// --- HELPER: CÁLCULO DE DISTÂNCIA ---
+// --- HELPERS ---
 const calcDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
-    const R = 6371; // Raio da Terra em km
+    const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-        Math.sin(dLon/2) * Math.sin(dLon/2);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+              Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c;
 };
@@ -37,33 +35,153 @@ const formatDate = (iso: string) => {
     } catch(e) { return iso; }
 };
 
-// --- COMPONENTE INTERNO: MAP CONTROLLER ---
-// Lida com o redimensionamento e zoom do mapa de forma segura
-const MapController: React.FC<{ points: VisitaPrevista[] }> = ({ points }) => {
+// --- COMPONENTE INTERNO: MAP AUTO-FIT ---
+// Apenas ajusta o zoom, não lida com resize
+const MapAutoFit: React.FC<{ points: VisitaPrevista[] }> = ({ points }) => {
     const map = useMap();
-
+    
     useEffect(() => {
-        // CORREÇÃO CRÍTICA DO MAPA CINZA:
-        // Aguarda um pequeno delay para o modal terminar a animação CSS e o DOM estar estável
-        const timer = setTimeout(() => {
-            map.invalidateSize();
-            
-            // Ajusta o zoom para os pontos
-            if (points && points.length > 0) {
-                const validPoints = points.filter(p => p.Lat !== 0 && p.Long !== 0);
-                if (validPoints.length > 0) {
-                    const bounds = L.latLngBounds(validPoints.map(p => [p.Lat, p.Long]));
-                    if (bounds.isValid()) {
-                        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-                    }
+        if (points && points.length > 0) {
+            const validPoints = points.filter(p => p.Lat && p.Long);
+            if (validPoints.length > 0) {
+                const bounds = L.latLngBounds(validPoints.map(p => [p.Lat, p.Long]));
+                if (bounds.isValid()) {
+                    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 });
                 }
             }
-        }, 300); // 300ms é suficiente para a maioria das animações de modal
-
-        return () => clearTimeout(timer);
+        }
+        // Force redraw once
+        map.invalidateSize();
     }, [map, points]);
 
     return null;
+};
+
+// --- COMPONENTE: MODAL DO MAPA (ISOLADO) ---
+const MapModal: React.FC<{ 
+    route: any; 
+    onClose: () => void; 
+}> = ({ route, onClose }) => {
+    // ESTADO DE MONTAGEM TARDIA (CRÍTICO PARA CORRIGIR TELA CINZA)
+    const [isMounted, setIsMounted] = useState(false);
+
+    useEffect(() => {
+        // Aguarda 300ms para garantir que o Modal CSS (width/height) foi aplicado
+        // antes de tentar renderizar o Leaflet.
+        const timer = setTimeout(() => setIsMounted(true), 300);
+        return () => clearTimeout(timer);
+    }, []);
+
+    const points = route.validPoints as VisitaPrevista[];
+    const hasPoints = points.length > 0;
+    const centerPos: [number, number] = hasPoints ? [points[0].Lat, points[0].Long] : [-23.55, -46.63];
+
+    return (
+        <div className="fixed inset-0 z-[200] bg-white flex flex-col h-screen w-screen">
+            {/* Header */}
+            <div className="h-16 bg-white border-b border-slate-200 flex justify-between items-center px-6 shrink-0 z-20 shadow-sm">
+                <div className="flex items-center">
+                    <button onClick={onClose} className="mr-4 p-2 hover:bg-slate-100 rounded-full transition text-slate-500">
+                        <ArrowLeftIcon className="w-6 h-6"/>
+                    </button>
+                    <div>
+                        <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                            <span className="font-mono mr-2">{formatDate(route.date)}</span>
+                            <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded uppercase">{route.dayName}</span>
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                            {route.points.length} Visitas ({points.length} GPS) • <strong>{route.km.toFixed(1)} km</strong>
+                        </p>
+                    </div>
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={() => window.print()} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm font-bold flex items-center">
+                        <PrinterIcon className="w-4 h-4 mr-2"/> Imprimir
+                    </button>
+                    <button onClick={onClose} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-md">
+                        Fechar
+                    </button>
+                </div>
+            </div>
+
+            {/* Container do Mapa */}
+            <div className="relative flex-1 bg-slate-100 w-full overflow-hidden">
+                {/* Debug Panel */}
+                <div className="absolute top-4 right-4 z-[9999] bg-white/90 backdrop-blur border border-slate-300 p-3 rounded shadow-lg text-xs font-mono pointer-events-none">
+                    <p className="font-bold border-b border-slate-300 mb-1">Diagnóstico Mapa</p>
+                    <p>Status: {isMounted ? 'Montado' : 'Carregando...'}</p>
+                    <p>Pontos Válidos: {points.length}</p>
+                    {hasPoints && <p>Centro: {centerPos[0].toFixed(4)}, {centerPos[1].toFixed(4)}</p>}
+                </div>
+
+                {!isMounted && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-50 z-50">
+                        <div className="flex flex-col items-center animate-pulse">
+                            <SpinnerIcon className="w-10 h-10 text-blue-600 mb-2"/>
+                            <span className="text-sm font-bold text-slate-400">Carregando Mapa...</span>
+                        </div>
+                    </div>
+                )}
+
+                {isMounted && hasPoints ? (
+                    <MapContainer 
+                        center={centerPos} 
+                        zoom={12} 
+                        scrollWheelZoom={true}
+                        style={{ height: '100%', width: '100%' }}
+                    >
+                        <MapAutoFit points={points} />
+                        
+                        {/* CartoDB Voyager - Mais rápido e limpo que OSM padrão */}
+                        <TileLayer 
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" 
+                        />
+
+                        {/* Rota (Azul) */}
+                        <Polyline 
+                            positions={points.map(p => [p.Lat, p.Long])}
+                            color="#2563eb"
+                            weight={5}
+                            opacity={0.8}
+                        />
+                        {/* Efeito Tracejado Branco */}
+                        <Polyline 
+                            positions={points.map(p => [p.Lat, p.Long])}
+                            color="white"
+                            weight={2}
+                            opacity={0.5}
+                            dashArray="5, 10"
+                        />
+
+                        {/* Marcadores */}
+                        {points.map((p, idx) => (
+                            <Marker key={`${idx}-${p.Lat}`} position={[p.Lat, p.Long]}>
+                                <Popup>
+                                    <div className="min-w-[200px]">
+                                        <p className="font-bold text-sm border-b pb-1 mb-1 text-slate-800">{idx + 1}. {p.Razao_Social}</p>
+                                        <p className="text-xs text-slate-600 mb-0.5"><strong>End:</strong> {p.Endereco}</p>
+                                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
+                                            <span>Lat: {p.Lat.toFixed(5)}</span>
+                                            <span>Lon: {p.Long.toFixed(5)}</span>
+                                        </div>
+                                    </div>
+                                </Popup>
+                            </Marker>
+                        ))}
+                    </MapContainer>
+                ) : isMounted && !hasPoints && (
+                    <div className="flex h-full items-center justify-center flex-col text-slate-400">
+                        <ExclamationIcon className="w-16 h-16 mb-4 opacity-50"/>
+                        <h3 className="text-xl font-bold">Sem Coordenadas</h3>
+                        <p className="max-w-md text-center mt-2">
+                            Os endereços desta rota não possuem latitude/longitude válidas no cadastro.
+                        </p>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 };
 
 // --- COMPONENTE PRINCIPAL ---
@@ -79,7 +197,7 @@ export const Roteirizador: React.FC = () => {
     const [rawData, setRawData] = useState<VisitaPrevista[]>([]);
     const [expandedSellers, setExpandedSellers] = useState<Set<number>>(new Set());
     
-    // Modal do Mapa
+    // Rota Selecionada para o Modal
     const [viewingRoute, setViewingRoute] = useState<any | null>(null);
 
     // --- CARREGAMENTO DE DADOS ---
@@ -98,7 +216,7 @@ export const Roteirizador: React.FC = () => {
         }
     };
 
-    // --- FILTROS (Memoized) ---
+    // --- FILTROS ---
     const supervisors = useMemo(() => {
         const map = new Map<number, string>();
         rawData.forEach(v => map.set(v.Cod_Supervisor, v.Nome_Supervisor));
@@ -115,7 +233,7 @@ export const Roteirizador: React.FC = () => {
         return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
     }, [rawData, selectedSupervisor]);
 
-    // --- PROCESSAMENTO (Agrupamento e Cálculo) ---
+    // --- PROCESSAMENTO ---
     const groupedData = useMemo(() => {
         if (rawData.length === 0) return [];
 
@@ -125,7 +243,6 @@ export const Roteirizador: React.FC = () => {
             return true;
         });
 
-        // Mapa: ID Vendedor -> Objeto Vendedor
         const sellerMap = new Map<number, any>();
 
         filtered.forEach(v => {
@@ -139,7 +256,6 @@ export const Roteirizador: React.FC = () => {
                 });
             }
             
-            // Extrai YYYY-MM-DD
             let dateKey = '';
             if (v.Data_da_Visita) {
                 if(typeof v.Data_da_Visita === 'string') dateKey = v.Data_da_Visita.substring(0, 10);
@@ -153,14 +269,12 @@ export const Roteirizador: React.FC = () => {
             }
         });
 
-        // Transforma Mapa em Array Final
         const result = [];
         for (const seller of sellerMap.values()) {
             const daysArr = [];
             let totalKm = 0;
 
             for (const [date, visits] of seller.days.entries()) {
-                // Filtra pontos com lat/long válidos para cálculo e mapa
                 const validPoints = (visits as VisitaPrevista[]).filter(p => 
                     p.Lat !== undefined && p.Long !== undefined && 
                     !isNaN(p.Lat) && !isNaN(p.Long) &&
@@ -179,8 +293,8 @@ export const Roteirizador: React.FC = () => {
                     date: date,
                     dayName: (visits as any[])[0].Dia_Semana || '',
                     km: kmEst,
-                    points: visits, // Todos os pontos (lista)
-                    validPoints: validPoints // Pontos plotáveis (mapa)
+                    points: visits,
+                    validPoints: validPoints
                 });
             }
             
@@ -194,129 +308,11 @@ export const Roteirizador: React.FC = () => {
         return result.sort((a, b) => a.id - b.id);
     }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor]);
 
-    // --- RENDERIZAÇÃO: MODAL DO MAPA ---
-    const renderMapModal = () => {
-        if (!viewingRoute) return null;
-
-        const points = viewingRoute.validPoints as VisitaPrevista[];
-        const hasPoints = points.length > 0;
-        // Ponto central padrão (SP) se não houver dados
-        const centerPos: [number, number] = hasPoints ? [points[0].Lat, points[0].Long] : [-23.5505, -46.6333];
-
-        return (
-            <div className="fixed inset-0 z-[200] bg-white flex flex-col h-screen w-screen">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white shadow-sm shrink-0 z-10 h-20">
-                    <div className="flex items-center space-x-4">
-                        <button 
-                            onClick={() => setViewingRoute(null)}
-                            className="p-2 hover:bg-slate-100 rounded-full transition text-slate-500"
-                        >
-                            <ArrowLeftIcon className="w-6 h-6"/>
-                        </button>
-                        <div>
-                            <h2 className="text-lg font-bold text-slate-800 flex items-center">
-                                <span className="font-mono mr-2">{formatDate(viewingRoute.date)}</span>
-                                <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded uppercase">{viewingRoute.dayName}</span>
-                            </h2>
-                            <p className="text-sm text-slate-500">
-                                {viewingRoute.points.length} Visitas ({points.length} com GPS) • Estimativa: <strong>{viewingRoute.km.toFixed(1)} km</strong>
-                            </p>
-                        </div>
-                    </div>
-                    <div className="flex space-x-2">
-                        <button onClick={() => window.print()} className="flex items-center px-4 py-2 bg-white border border-slate-300 rounded-lg text-slate-700 font-bold text-sm hover:bg-slate-50">
-                            <PrinterIcon className="w-4 h-4 mr-2"/> Imprimir
-                        </button>
-                        <button onClick={() => setViewingRoute(null)} className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm shadow-md">
-                            Fechar
-                        </button>
-                    </div>
-                </div>
-
-                {/* Área do Mapa */}
-                <div className="relative w-full bg-slate-100" style={{ height: 'calc(100vh - 80px)' }}>
-                    {/* Debug Panel - Para verificar dados recebidos */}
-                    <div className="absolute top-4 right-4 z-[9999] bg-white/90 backdrop-blur border border-slate-300 p-3 rounded shadow-lg text-xs font-mono">
-                        <p className="font-bold border-b border-slate-300 mb-1 pb-1">Debug de Coordenadas</p>
-                        <p>Total Pontos: {viewingRoute.points.length}</p>
-                        <p className={hasPoints ? "text-emerald-600 font-bold" : "text-red-600 font-bold"}>
-                            Válidos (Lat/Lon): {points.length}
-                        </p>
-                        {hasPoints && (
-                            <div className="mt-1 text-[10px] text-slate-500">
-                                Ex: {points[0].Lat.toFixed(5)}, {points[0].Long.toFixed(5)}
-                            </div>
-                        )}
-                        {!hasPoints && <p className="text-red-500 mt-1">Nenhuma coordenada válida!</p>}
-                    </div>
-
-                    {hasPoints ? (
-                        <MapContainer 
-                            key={viewingRoute.date + '-' + points.length} // Força remontagem se mudar rota
-                            center={centerPos} 
-                            zoom={12} 
-                            scrollWheelZoom={true}
-                            style={{ height: '100%', width: '100%' }}
-                        >
-                            <MapController points={points} />
-                            
-                            <TileLayer 
-                                attribution='&copy; OpenStreetMap'
-                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" 
-                            />
-
-                            {/* Rota */}
-                            <Polyline 
-                                positions={points.map(p => [p.Lat, p.Long])}
-                                color="#3b82f6"
-                                weight={5}
-                                opacity={0.8}
-                            />
-                            {/* Pontilhada Branca (Efeito Estrada) */}
-                            <Polyline 
-                                positions={points.map(p => [p.Lat, p.Long])}
-                                color="white"
-                                weight={2}
-                                opacity={0.5}
-                                dashArray="5, 10"
-                            />
-
-                            {/* Marcadores */}
-                            {points.map((p, idx) => (
-                                <Marker key={`${idx}-${p.Lat}-${p.Long}`} position={[p.Lat, p.Long]}>
-                                    <Popup>
-                                        <div className="min-w-[200px]">
-                                            <p className="font-bold text-sm border-b pb-1 mb-1 text-slate-800">{idx + 1}. {p.Razao_Social}</p>
-                                            <p className="text-xs text-slate-600 mb-0.5"><strong>End:</strong> {p.Endereco}</p>
-                                            <p className="text-xs text-slate-500 uppercase">{p.Bairro} - {p.Cidade}</p>
-                                            <div className="mt-2 text-[9px] text-slate-400 font-mono">
-                                                Lat: {p.Lat} <br/> Lon: {p.Long}
-                                            </div>
-                                        </div>
-                                    </Popup>
-                                </Marker>
-                            ))}
-                        </MapContainer>
-                    ) : (
-                        <div className="flex h-full items-center justify-center flex-col text-slate-400">
-                            <ExclamationIcon className="w-16 h-16 mb-4 opacity-50"/>
-                            <h3 className="text-xl font-bold">Dados de Geolocalização Indisponíveis</h3>
-                            <p className="max-w-md text-center mt-2">
-                                O sistema não recebeu latitude/longitude válidas para esta rota.
-                                Verifique o cadastro no ERP/Pulsus.
-                            </p>
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
-
-    // --- RENDERIZAÇÃO: RELATÓRIO ---
+    // --- RENDERIZAÇÃO ---
     return (
         <div className="space-y-6 animate-fade-in">
-            {renderMapModal()}
+            {/* Modal Condicional */}
+            {viewingRoute && <MapModal route={viewingRoute} onClose={() => setViewingRoute(null)} />}
 
             <div className="flex justify-between items-end">
                 <div>
@@ -325,7 +321,6 @@ export const Roteirizador: React.FC = () => {
                 </div>
             </div>
 
-            {/* Painel de Controle */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <div className="flex flex-wrap gap-4 items-end">
                     <div className="w-40">
@@ -370,7 +365,6 @@ export const Roteirizador: React.FC = () => {
                 )}
             </div>
 
-            {/* Tabela de Resultados */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <table className="w-full text-sm text-left text-slate-600">
                     <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-xs border-b border-slate-200">
@@ -414,7 +408,6 @@ export const Roteirizador: React.FC = () => {
                                             <td className="p-4 text-right font-bold text-blue-600 text-base">{seller.totalKm.toFixed(1)} km</td>
                                         </tr>
 
-                                        {/* Detalhe Expandido (Dias) */}
                                         {isExpanded && (
                                             <tr className="bg-slate-50/50 shadow-inner">
                                                 <td colSpan={5} className="p-0">
