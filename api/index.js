@@ -593,13 +593,13 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
             };
 
             return {
-                Cod_Vend: getVal(['COD_VEND', 'ID_VENDEDOR', 'VENDEDOR_ID']) || 0,
-                Nome_Vendedor: getVal(['NOME_VENDEDOR', 'VENDEDOR', 'NOME']) || 'Desconhecido',
-                Cod_Supervisor: getVal(['COD_SUPERVISOR', 'ID_SUPERVISOR']) || 0,
-                Nome_Supervisor: getVal(['NOME_SUPERVISOR', 'SUPERVISOR']) || '',
-                Cod_Cliente: getVal(['COD_CLIENTE', 'ID_CLIENTE', 'CLIENTE_ID']) || 0,
-                Razao_Social: getVal(['RAZAO_SOCIAL', 'CLIENTE', 'NOME_FANTASIA', 'NOME_CLIENTE']) || 'Cliente',
-                Dia_Semana: getVal(['DIA_SEMANA', 'DIA']) || '',
+                Cod_Vend: getVal(['COD_VEND', 'ID_VENDEDOR', 'VENDEDOR_ID', 'COD. VEND']) || 0,
+                Nome_Vendedor: getVal(['NOME_VENDEDOR', 'VENDEDOR', 'NOME', 'NOME VENDEDOR']) || 'Desconhecido',
+                Cod_Supervisor: getVal(['COD_SUPERVISOR', 'ID_SUPERVISOR', 'COD. SUPERVISOR']) || 0,
+                Nome_Supervisor: getVal(['NOME_SUPERVISOR', 'SUPERVISOR', 'NOME SUPERVISOR']) || '',
+                Cod_Cliente: getVal(['COD_CLIENTE', 'ID_CLIENTE', 'CLIENTE_ID', 'COD. CLIENTE']) || 0,
+                Razao_Social: getVal(['RAZAO_SOCIAL', 'CLIENTE', 'NOME_FANTASIA', 'NOME_CLIENTE', 'RAZÃO SOCIAL', 'RAZAO SOCIAL']) || 'Cliente',
+                Dia_Semana: getVal(['DIA_SEMANA', 'DIA', 'DIA SEMANA']) || '',
                 Periodicidade: getVal(['PERIODICIDADE']) || '',
                 // Tratamento de Data seguro para serialização JSON
                 Data_da_Visita: (() => {
