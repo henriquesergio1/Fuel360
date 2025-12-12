@@ -151,7 +151,10 @@ const MockService = {
     updateLicense: async () => ({ message: 'Licença ativada (Mock)' }),
     getSystemConfig: async (): Promise<SystemConfig> => ({ companyName: 'Fuel360 Mock', logoUrl: '' }),
     updateSystemConfig: async () => {},
-    getIntegrationConfig: async (): Promise<IntegrationConfig> => ({ extDb_Host: 'localhost', extDb_Port: 3306, extDb_User: 'root', extDb_Pass: '', extDb_Database: 'db', extDb_Query: '' }),
+    getIntegrationConfig: async (): Promise<IntegrationConfig> => ({ 
+        colab: { host: 'localhost', port: 3306, user: 'root', pass: '', database: 'db', query: '', type: 'MARIADB' },
+        route: { host: 'localhost', port: 1433, user: 'sa', pass: '', database: 'flexx', query: '', type: 'MSSQL' }
+    }),
     updateIntegrationConfig: async () => {},
     getUsuarios: async (): Promise<Usuario[]> => ([{ ID_Usuario: 1, Nome: 'Admin Mock', Usuario: 'admin', Perfil: 'Admin', Ativo: true }]),
     createUsuario: async () => {},

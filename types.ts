@@ -1,3 +1,4 @@
+
 export interface Usuario {
     ID_Usuario: number;
     Nome: string;
@@ -62,13 +63,19 @@ export interface Ausencia {
     Motivo: string;
 }
 
+export interface DbConnectionConfig {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    database: string;
+    query: string;
+    type: 'MARIADB' | 'MSSQL'; // Tipo do banco
+}
+
 export interface IntegrationConfig {
-    extDb_Host: string;
-    extDb_Port: number;
-    extDb_User: string;
-    extDb_Pass: string;
-    extDb_Database: string;
-    extDb_Query: string;
+    colab: DbConnectionConfig;
+    route: DbConnectionConfig;
 }
 
 export interface DiffItem {

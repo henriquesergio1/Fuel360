@@ -1,206 +1,30 @@
 
-
 -- =================================================================================
--- SCRIPT DE CRIAÇÃO DO BANCO DE DADOS - FUEL360 (REEMBOLSO)
--- VERSÃO 1.4.6 (Atualizado para Integração DB)
+-- SCRIPT DE ATUALIZAÇÃO DO BANCO DE DADOS - FUEL360
+-- VERSÃO 1.5.0 (Suporte a Múltiplos Bancos Externos)
 -- =================================================================================
-
-IF NOT EXISTS (SELECT * FROM sys.databases WHERE name = 'Fuel360')
-BEGIN
-    CREATE DATABASE Fuel360;
-END;
-GO
 
 USE Fuel360;
 GO
 
--- ---------------------------------------------------------------------------------
--- Tabelas de Sistema
--- ---------------------------------------------------------------------------------
-IF OBJECT_ID('dbo.SystemSettings', 'U') IS NULL
+-- Atualização da Tabela SystemSettings para suportar 2 conexões externas
+IF EXISTS(SELECT * FROM sys.tables WHERE name = 'SystemSettings')
 BEGIN
-    CREATE TABLE SystemSettings (
-        ID INT PRIMARY KEY CHECK (ID = 1),
-        LicenseKey NVARCHAR(MAX),
-        CompanyName NVARCHAR(100),
-        LogoUrl NVARCHAR(MAX),
-        
-        -- Configuração Integração Externa (MariaDB/MySQL)
-        ExtDb_Host NVARCHAR(255),
-        ExtDb_Port INT,
-        ExtDb_User NVARCHAR(100),
-        ExtDb_Pass NVARCHAR(255),
-        ExtDb_Database NVARCHAR(100),
-        ExtDb_Query NVARCHAR(MAX)
-    );
-    INSERT INTO SystemSettings (ID, LicenseKey, CompanyName) VALUES (1, NULL, 'Fuel360');
-END
-ELSE
-BEGIN
-    -- Migração para adicionar colunas se não existirem
-    IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'ExtDb_Host' AND Object_ID = Object_ID(N'SystemSettings'))
+    -- Adiciona colunas para a ROTA (SQL Server FlagCloud) se não existirem
+    IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'ExtRoute_Host' AND Object_ID = Object_ID(N'SystemSettings'))
     BEGIN
         ALTER TABLE SystemSettings ADD 
-            ExtDb_Host NVARCHAR(255),
-            ExtDb_Port INT,
-            ExtDb_User NVARCHAR(100),
-            ExtDb_Pass NVARCHAR(255),
-            ExtDb_Database NVARCHAR(100),
-            ExtDb_Query NVARCHAR(MAX);
+            -- Configuração Roteirizador (SQL Server)
+            ExtRoute_Host NVARCHAR(255),
+            ExtRoute_Port INT DEFAULT 1433,
+            ExtRoute_User NVARCHAR(100),
+            ExtRoute_Pass NVARCHAR(255),
+            ExtRoute_Database NVARCHAR(100),
+            ExtRoute_Query NVARCHAR(MAX);
     END
-END
-GO
-
-IF OBJECT_ID('dbo.Usuarios', 'U') IS NULL
-BEGIN
-    CREATE TABLE Usuarios (
-        ID_Usuario INT IDENTITY(1,1) PRIMARY KEY,
-        Nome NVARCHAR(100) NOT NULL,
-        Usuario NVARCHAR(50) NOT NULL UNIQUE,
-        SenhaHash NVARCHAR(255) NOT NULL,
-        Perfil NVARCHAR(20) NOT NULL DEFAULT 'Operador',
-        Ativo BIT NOT NULL DEFAULT 1,
-        DataCriacao DATETIME DEFAULT GETDATE()
-    );
-END
-GO
-
--- Inserção de usuário padrão caso a tabela esteja vazia (Senha: admin)
-IF NOT EXISTS (SELECT * FROM Usuarios)
-BEGIN
-    -- Hash gerado para 'admin' com 10 rounds
-    INSERT INTO Usuarios (Nome, Usuario, SenhaHash, Perfil, Ativo) 
-    VALUES ('Administrador Padrão', 'admin', '$2a$10$X.x.x.x.x.x.x.x', 'Admin', 1);
-END
-GO
-
--- ---------------------------------------------------------------------------------
--- TABELAS DE NEGÓCIO (FUEL360)
--- ---------------------------------------------------------------------------------
-
--- Colaboradores (Com Auditoria)
-IF OBJECT_ID('dbo.Colaboradores', 'U') IS NULL
-BEGIN
-    CREATE TABLE Colaboradores (
-        ID_Colaborador INT IDENTITY(1,1) PRIMARY KEY,
-        ID_Pulsus INT NOT NULL UNIQUE,
-        CodigoSetor INT NOT NULL DEFAULT 0,
-        Nome NVARCHAR(150) NOT NULL,
-        Grupo NVARCHAR(50) NOT NULL,
-        TipoVeiculo NVARCHAR(20) NOT NULL DEFAULT 'Carro',
-        Ativo BIT NOT NULL DEFAULT 1,
-        
-        -- Auditoria
-        DataCriacao DATETIME DEFAULT GETDATE(),
-        UsuarioCriacao NVARCHAR(50),
-        DataAlteracao DATETIME,
-        UsuarioAlteracao NVARCHAR(50),
-        MotivoAlteracao NVARCHAR(255)
-    );
-    CREATE INDEX IDX_Colaboradores_Grupo ON Colaboradores(Grupo);
-END
-GO
-
--- Controle de Ausências (Novo v1.3.7)
-IF OBJECT_ID('dbo.ControleAusencias', 'U') IS NULL
-BEGIN
-    CREATE TABLE ControleAusencias (
-        ID_Ausencia INT IDENTITY(1,1) PRIMARY KEY,
-        ID_Colaborador INT NOT NULL,
-        DataInicio DATE NOT NULL,
-        DataFim DATE NOT NULL,
-        Motivo NVARCHAR(255) NOT NULL, -- Férias, Atestado, Falta
-        DataRegistro DATETIME DEFAULT GETDATE(),
-        UsuarioRegistro NVARCHAR(50),
-
-        CONSTRAINT FK_Ausencia_Colaborador FOREIGN KEY (ID_Colaborador) REFERENCES Colaboradores(ID_Colaborador) ON DELETE CASCADE
-    );
-END
-GO
-
--- Configuração de Reembolso (Singleton com Auditoria)
-IF OBJECT_ID('dbo.ConfigReembolso', 'U') IS NULL
-BEGIN
-    CREATE TABLE ConfigReembolso (
-        ID INT PRIMARY KEY CHECK (ID = 1),
-        PrecoCombustivel DECIMAL(10, 2) NOT NULL DEFAULT 5.89,
-        KmL_Carro DECIMAL(10, 2) NOT NULL DEFAULT 10.00,
-        KmL_Moto DECIMAL(10, 2) NOT NULL DEFAULT 35.00,
-        
-        -- Auditoria
-        DataAlteracao DATETIME,
-        UsuarioAlteracao NVARCHAR(50),
-        MotivoAlteracao NVARCHAR(255)
-    );
-    INSERT INTO ConfigReembolso (ID, PrecoCombustivel, KmL_Carro, KmL_Moto) VALUES (1, 5.89, 10.0, 35.0);
-END
-GO
-
--- Logs de Ações do Sistema (Importações, Cálculos, etc.)
-IF OBJECT_ID('dbo.LogsSistema', 'U') IS NULL
-BEGIN
-    CREATE TABLE LogsSistema (
-        ID_Log INT IDENTITY(1,1) PRIMARY KEY,
-        DataHora DATETIME DEFAULT GETDATE(),
-        Usuario NVARCHAR(50) NOT NULL,
-        Acao NVARCHAR(50) NOT NULL, -- Ex: 'IMPORTACAO_CSV', 'CALCULO_GERADO'
-        Detalhes NVARCHAR(MAX) -- Ex: 'Importou 150 registros', 'Gerou calculo periodo X'
-    );
-END
-GO
-
--- ---------------------------------------------------------------------------------
--- TABELAS DE HISTÓRICO DE CÁLCULO (NOVO v1.3.3)
--- ---------------------------------------------------------------------------------
-
--- Cabeçalho do Cálculo (Um registro por Importação/Lote Salvo)
-IF OBJECT_ID('dbo.HistoricoCalculos', 'U') IS NULL
-BEGIN
-    CREATE TABLE HistoricoCalculos (
-        ID_Calculo INT IDENTITY(1,1) PRIMARY KEY,
-        DataGeracao DATETIME DEFAULT GETDATE(),
-        PeriodoReferencia NVARCHAR(100),
-        UsuarioGerador NVARCHAR(50),
-        TotalGeral DECIMAL(18, 2),
-        QtdColaboradores INT
-    );
-END
-GO
-
--- Detalhes do Cálculo (Um registro por Colaborador no Lote)
-IF OBJECT_ID('dbo.HistoricoDetalhes', 'U') IS NULL
-BEGIN
-    CREATE TABLE HistoricoDetalhes (
-        ID_Detalhe INT IDENTITY(1,1) PRIMARY KEY,
-        ID_Calculo INT NOT NULL,
-        ID_Pulsus INT NOT NULL,
-        NomeColaborador NVARCHAR(150),
-        Grupo NVARCHAR(50),
-        TipoVeiculo NVARCHAR(20),
-        TotalKM DECIMAL(10, 2),
-        ValorReembolso DECIMAL(10, 2),
-        
-        -- Snapshot dos parâmetros usados no momento do cálculo
-        ParametroPreco DECIMAL(10, 2),
-        ParametroKmL DECIMAL(10, 2),
-
-        CONSTRAINT FK_Historico_Detalhes FOREIGN KEY (ID_Calculo) REFERENCES HistoricoCalculos(ID_Calculo) ON DELETE CASCADE
-    );
-END
-GO
-
--- Detalhes Diários (Um registro por Dia/Corrida do Colaborador) - NOVO v1.3.6
-IF OBJECT_ID('dbo.HistoricoDiario', 'U') IS NULL
-BEGIN
-    CREATE TABLE HistoricoDiario (
-        ID_Diario INT IDENTITY(1,1) PRIMARY KEY,
-        ID_Detalhe INT NOT NULL,
-        DataOcorrencia DATE,
-        KM_Dia DECIMAL(10, 2),
-        Valor_Dia DECIMAL(10, 2),
-        Observacao NVARCHAR(100), -- Novo v1.4.0: Motivo se estiver zerado (ex: Férias)
-        
-        CONSTRAINT FK_Historico_Diario FOREIGN KEY (ID_Detalhe) REFERENCES HistoricoDetalhes(ID_Detalhe) ON DELETE CASCADE
-    );
+    
+    -- Opcional: Renomear as colunas antigas para ExtColab_... para clareza, 
+    -- mas vamos mantê-las como ExtDb_... para compatibilidade e apenas mapear na API.
+    -- ExtDb_... = Colaboradores (MariaDB)
 END
 GO

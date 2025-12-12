@@ -14,7 +14,7 @@ app.use(cors());
 const API_PORT = process.env.API_PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-dev';
 
-// --- CONFIGURAÇÃO BANCO LOCAL (FUEL360) ---
+// --- CONFIGURAÇÃO BANCO LOCAL (FUEL360 - SQL Server Interno) ---
 const dbConfig = {
     server: process.env.DB_SERVER_FUEL360 || '10.10.10.100',
     authentication: {
@@ -32,33 +32,14 @@ const dbConfig = {
     }
 };
 
-// --- CONFIGURAÇÃO BANCO EXTERNO (FLEXX) ---
-const flexxConfig = {
-    server: process.env.DB_SERVER_FLEXX || 'consulta.flagcloud.com.br',
-    authentication: {
-        type: 'default',
-        options: {
-            userName: process.env.DB_USER_FLEXX || 'sa',
-            password: process.env.DB_PASSWORD_FLEXX || 'senha'
-        }
-    },
-    options: {
-        database: process.env.DB_DATABASE_FLEXX || 'FLEXX10071188',
-        encrypt: false, // Pode precisar ser true dependendo do servidor externo
-        trustServerCertificate: true,
-        rowCollectionOnRequestCompletion: true,
-        requestTimeout: 60000 // Timeout maior para queries pesadas
-    }
-};
-
-// Helper Genérico para Executar Queries
+// Helper Genérico para Executar Queries Localmente (Fuel360)
 function executeQuery(config, query, params = []) {
     return new Promise((resolve, reject) => {
         const connection = new Connection(config);
         
         connection.on('connect', err => {
             if (err) {
-                console.error('Connection Failed:', err);
+                console.error('Connection Failed (Local DB):', err);
                 return reject(err);
             }
             
@@ -124,19 +105,16 @@ app.post('/login', async (req, res) => {
 
         if (!user.Ativo) return res.status(401).json({ message: "Usuário inativo" });
 
-        // Em produção, usar bcrypt.compare. Para dev/legado, verificação simples se não for hash
         let valid = false;
         if (user.SenhaHash.startsWith('$2a$')) {
             valid = await bcrypt.compare(senha, user.SenhaHash);
         } else {
-            valid = (senha === user.SenhaHash); // Fallback temporário
+            valid = (senha === user.SenhaHash);
         }
 
         if (!valid) return res.status(401).json({ message: "Senha incorreta" });
 
         const token = jwt.sign({ id: user.ID_Usuario, perfil: user.Perfil }, JWT_SECRET, { expiresIn: '12h' });
-        
-        // Remove hash antes de enviar
         delete user.SenhaHash;
         res.json({ token, user });
 
@@ -146,27 +124,17 @@ app.post('/login', async (req, res) => {
     }
 });
 
-// --- ROTAS DO SISTEMA ---
+// --- ROTAS DE SISTEMA / CONFIGURAÇÃO ---
+
+// Status
 app.get('/system/status', async (req, res) => {
-    // Health Check simples
     res.json({ status: 'ACTIVE', client: 'Fuel360 Enterprise', expiresAt: '2099-12-31' });
 });
 
+// Configuração Geral
 app.get('/system/config', authenticateToken, async (req, res) => {
     try {
         const { rows } = await executeQuery(dbConfig, "SELECT CompanyName as companyName, LogoUrl as logoUrl FROM SystemSettings WHERE ID = 1");
-        res.json(rows[0] || {});
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.get('/system/integration', authenticateToken, async (req, res) => {
-    try {
-        const { rows } = await executeQuery(dbConfig, "SELECT ExtDb_Host, ExtDb_Port, ExtDb_User, ExtDb_Pass, ExtDb_Database, ExtDb_Query FROM SystemSettings WHERE ID = 1");
-        // Ocultar senha
-        // const data = rows[0] || {};
-        // data.ExtDb_Pass = ''; 
         res.json(rows[0] || {});
     } catch (e) {
         res.status(500).json({ message: e.message });
@@ -187,278 +155,83 @@ app.put('/system/config', authenticateToken, async (req, res) => {
     }
 });
 
-// --- ROTAS DE COLABORADORES ---
-app.get('/colaboradores', authenticateToken, async (req, res) => {
-    try {
-        const { rows } = await executeQuery(dbConfig, "SELECT * FROM Colaboradores WHERE Ativo = 1 ORDER BY Nome");
-        res.json(rows);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.post('/colaboradores', authenticateToken, async (req, res) => {
-    try {
-        const c = req.body;
-        const query = `
-            INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao)
-            VALUES (@idp, @cod, @nome, @grp, @tpo, @atv, @usr);
-            SELECT SCOPE_IDENTITY() as id;
-        `;
-        const params = [
-            { name: 'idp', type: TYPES.Int, value: c.ID_Pulsus },
-            { name: 'cod', type: TYPES.Int, value: c.CodigoSetor },
-            { name: 'nome', type: TYPES.NVarChar, value: c.Nome },
-            { name: 'grp', type: TYPES.NVarChar, value: c.Grupo },
-            { name: 'tpo', type: TYPES.NVarChar, value: c.TipoVeiculo },
-            { name: 'atv', type: TYPES.Bit, value: c.Ativo },
-            { name: 'usr', type: TYPES.NVarChar, value: 'API' }
-        ];
-        const { rows } = await executeQuery(dbConfig, query, params);
-        res.json({ ...c, ID_Colaborador: rows[0].id });
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.put('/colaboradores/:id', authenticateToken, async (req, res) => {
-    try {
-        const id = req.params.id;
-        const c = req.body;
-        const query = `
-            UPDATE Colaboradores SET 
-                ID_Pulsus=@idp, CodigoSetor=@cod, Nome=@nome, Grupo=@grp, TipoVeiculo=@tpo, Ativo=@atv,
-                UsuarioAlteracao=@usr, DataAlteracao=GETDATE(), MotivoAlteracao=@mtv
-            WHERE ID_Colaborador = @id
-        `;
-        const params = [
-            { name: 'idp', type: TYPES.Int, value: c.ID_Pulsus },
-            { name: 'cod', type: TYPES.Int, value: c.CodigoSetor },
-            { name: 'nome', type: TYPES.NVarChar, value: c.Nome },
-            { name: 'grp', type: TYPES.NVarChar, value: c.Grupo },
-            { name: 'tpo', type: TYPES.NVarChar, value: c.TipoVeiculo },
-            { name: 'atv', type: TYPES.Bit, value: c.Ativo },
-            { name: 'usr', type: TYPES.NVarChar, value: 'API' },
-            { name: 'mtv', type: TYPES.NVarChar, value: c.MotivoAlteracao || 'Edição via Sistema' },
-            { name: 'id', type: TYPES.Int, value: id }
-        ];
-        await executeQuery(dbConfig, query, params);
-        res.json(c);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-// --- ROTA DE CONFIGURAÇÃO DE COMBUSTÍVEL ---
-app.get('/config/fuel', authenticateToken, async (req, res) => {
-    try {
-        const { rows } = await executeQuery(dbConfig, "SELECT * FROM ConfigReembolso WHERE ID = 1");
-        res.json(rows[0] || {});
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.put('/config/fuel', authenticateToken, async (req, res) => {
-    try {
-        const c = req.body;
-        const query = `
-            UPDATE ConfigReembolso SET 
-                PrecoCombustivel=@p, KmL_Carro=@kc, KmL_Moto=@km,
-                UsuarioAlteracao=@usr, DataAlteracao=GETDATE(), MotivoAlteracao=@mtv
-            WHERE ID = 1
-        `;
-        const params = [
-            { name: 'p', type: TYPES.Decimal, value: c.PrecoCombustivel },
-            { name: 'kc', type: TYPES.Decimal, value: c.KmL_Carro },
-            { name: 'km', type: TYPES.Decimal, value: c.KmL_Moto },
-            { name: 'usr', type: TYPES.NVarChar, value: 'API' },
-            { name: 'mtv', type: TYPES.NVarChar, value: c.MotivoAlteracao }
-        ];
-        await executeQuery(dbConfig, query, params);
-        
-        // Log
-        await executeQuery(dbConfig, "INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES ('API', 'CONFIG_UPDATE', 'Atualização de parâmetros de combustível')");
-        
-        res.sendStatus(200);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-app.get('/config/fuel/history', authenticateToken, async (req, res) => {
-    try {
-        const { rows } = await executeQuery(dbConfig, "SELECT TOP 10 * FROM LogsSistema WHERE Acao = 'CONFIG_UPDATE' ORDER BY DataHora DESC");
-        res.json(rows);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
-
-// --- ROTAS DE AUSÊNCIAS ---
-app.get('/ausencias', authenticateToken, async (req, res) => {
+// Configuração de Integração (GET) - Retorna os 2 bancos
+app.get('/system/integration', authenticateToken, async (req, res) => {
     try {
         const query = `
-            SELECT a.*, c.Nome as NomeColaborador, c.ID_Pulsus 
-            FROM ControleAusencias a
-            INNER JOIN Colaboradores c ON a.ID_Colaborador = c.ID_Colaborador
-            ORDER BY a.DataInicio DESC
+            SELECT 
+                ExtDb_Host, ExtDb_Port, ExtDb_User, ExtDb_Pass, ExtDb_Database, ExtDb_Query,
+                ExtRoute_Host, ExtRoute_Port, ExtRoute_User, ExtRoute_Pass, ExtRoute_Database, ExtRoute_Query
+            FROM SystemSettings WHERE ID = 1
         `;
         const { rows } = await executeQuery(dbConfig, query);
-        res.json(rows);
+        const data = rows[0] || {};
+
+        res.json({
+            colab: {
+                host: data.ExtDb_Host || '',
+                port: data.ExtDb_Port || 3306,
+                user: data.ExtDb_User || '',
+                pass: data.ExtDb_Pass || '', // Senha enviada para exibição no front (cuidado em prod real)
+                database: data.ExtDb_Database || '',
+                query: data.ExtDb_Query || '',
+                type: 'MARIADB'
+            },
+            route: {
+                host: data.ExtRoute_Host || '',
+                port: data.ExtRoute_Port || 1433,
+                user: data.ExtRoute_User || '',
+                pass: data.ExtRoute_Pass || '',
+                database: data.ExtRoute_Database || '',
+                query: data.ExtRoute_Query || '',
+                type: 'MSSQL'
+            }
+        });
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
 });
 
-app.post('/ausencias', authenticateToken, async (req, res) => {
+// Configuração de Integração (PUT) - Salva os 2 bancos
+app.put('/system/integration', authenticateToken, async (req, res) => {
     try {
-        const a = req.body;
-        const query = `
-            INSERT INTO ControleAusencias (ID_Colaborador, DataInicio, DataFim, Motivo, UsuarioRegistro)
-            VALUES (@idc, @di, @df, @mtv, @usr);
-            SELECT SCOPE_IDENTITY() as id;
-        `;
-        const params = [
-            { name: 'idc', type: TYPES.Int, value: a.ID_Colaborador },
-            { name: 'di', type: TYPES.Date, value: a.DataInicio },
-            { name: 'df', type: TYPES.Date, value: a.DataFim },
-            { name: 'mtv', type: TYPES.NVarChar, value: a.Motivo },
-            { name: 'usr', type: TYPES.NVarChar, value: 'API' }
-        ];
-        const { rows } = await executeQuery(dbConfig, query, params);
+        const { colab, route } = req.body;
         
-        // Retorna o objeto criado enriquecido
-        const newObj = { ...a, ID_Ausencia: rows[0].id };
-        res.json(newObj);
-    } catch (e) {
-        res.status(500).json({ message: e.message });
-    }
-});
+        const query = `
+            UPDATE SystemSettings SET 
+                ExtDb_Host = @ch, ExtDb_Port = @cp, ExtDb_User = @cu, ExtDb_Pass = @cpass, ExtDb_Database = @cd, ExtDb_Query = @cq,
+                ExtRoute_Host = @rh, ExtRoute_Port = @rp, ExtRoute_User = @ru, ExtRoute_Pass = @rpass, ExtRoute_Database = @rd, ExtRoute_Query = @rq
+            WHERE ID = 1
+        `;
+        
+        const params = [
+            // Colaboradores (MariaDB)
+            { name: 'ch', type: TYPES.NVarChar, value: colab.host },
+            { name: 'cp', type: TYPES.Int, value: colab.port },
+            { name: 'cu', type: TYPES.NVarChar, value: colab.user },
+            { name: 'cpass', type: TYPES.NVarChar, value: colab.pass },
+            { name: 'cd', type: TYPES.NVarChar, value: colab.database },
+            { name: 'cq', type: TYPES.NVarChar, value: colab.query },
+            // Rota (SQL Server)
+            { name: 'rh', type: TYPES.NVarChar, value: route.host },
+            { name: 'rp', type: TYPES.Int, value: route.port },
+            { name: 'ru', type: TYPES.NVarChar, value: route.user },
+            { name: 'rpass', type: TYPES.NVarChar, value: route.pass },
+            { name: 'rd', type: TYPES.NVarChar, value: route.database },
+            { name: 'rq', type: TYPES.NVarChar, value: route.query }
+        ];
 
-app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
-    try {
-        const id = req.params.id;
-        // Logar a exclusão seria ideal antes de deletar
-        await executeQuery(dbConfig, "DELETE FROM ControleAusencias WHERE ID_Ausencia = @id", [{ name: 'id', type: TYPES.Int, value: id }]);
+        await executeQuery(dbConfig, query, params);
         res.sendStatus(200);
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
 });
 
-// --- ROTEIRIZADOR (CONSULTA BANCO EXTERNO FLEXX) ---
-app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
-    try {
-        const { startDate, endDate } = req.query;
-
-        let dateStart = startDate;
-        let dateEnd = endDate;
-
-        if (!dateStart || !dateEnd) {
-            const now = new Date();
-            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-            dateStart = firstDay.toISOString().split('T')[0];
-            dateEnd = lastDay.toISOString().split('T')[0];
-        }
-
-        // Esta query será executada no servidor FLEXX (consulta.flagcloud.com.br)
-        // O banco default é o configurado em DB_DATABASE_FLEXX (FLEXX10071188)
-        // Portanto, referências a tabelas do próprio banco não precisam de prefixo, mas manter o prefixo não quebra se o banco for o mesmo.
-        
-        const query = `
-            DECLARE @DataInicio DATE = @pStartDate;
-            DECLARE @DataFim DATE = @pEndDate;
-
-            WITH DatasIntervalo AS (
-                SELECT @DataInicio AS DataVisita
-                UNION ALL
-                SELECT DATEADD(DAY, 1, DataVisita)
-                FROM DatasIntervalo
-                WHERE DATEADD(DAY, 1, DataVisita) <= @DataFim
-            ),
-            DiasComInfo AS (
-                SELECT 
-                    d.DataVisita,
-                    CASE 
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 1 THEN '7'
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 2 THEN '1'
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 3 THEN '2'
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 4 THEN '3'
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 5 THEN '4'
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 6 THEN '5'
-                        WHEN DATEPART(WEEKDAY, d.DataVisita) = 7 THEN '6'
-                    END AS DiaSemana
-                FROM DatasIntervalo d
-            )
-            SELECT DISTINCT
-                e.CODMTCEPGVDD AS 'Cod_Vend',
-                epg.NOMEPG AS 'Nome_Vendedor',
-                sbn.CODMTCEPGRPS AS 'Cod_Supervisor',
-                sup.NOMEPG AS 'Nome_Supervisor',
-                a.CODCET AS 'Cod_Cliente', 
-                d.NOMRAZSCLCET AS 'Razão_Social', 
-                CASE 
-                    WHEN a.CODDIASMN = '1' THEN 'Segunda' 
-                    WHEN a.CODDIASMN = '2' THEN 'Terca' 
-                    WHEN a.CODDIASMN = '3' THEN 'Quarta' 
-                    WHEN a.CODDIASMN = '4' THEN 'Quinta' 
-                    WHEN a.CODDIASMN = '5' THEN 'Sexta' 
-                    WHEN a.CODDIASMN = '6' THEN 'Sabado' 
-                    WHEN a.CODDIASMN = '7' THEN 'Domingo'
-                    ELSE 'SEM DIA CADASTRADO'
-                END AS 'Dia_Semana',
-                a.DESCCOVSTCET AS 'Periodicidade',
-                x.DataVisita AS 'Data_da_Visita',
-                g.deslgrcet AS 'Endereco',
-                i.desbro AS 'Bairro',
-                TRIM(h.descdd) AS 'Cidade',   
-                g.codcepcet AS 'CEP',
-                d.LATCET AS 'Lat',
-                d.LONCET AS 'Long'
-            FROM dbo.IBETVSTCET a
-            INNER JOIN DiasComInfo x ON a.CODDIASMN = x.DiaSemana
-            INNER JOIN dbo.IBETDATREFCCOVSTCET f 
-                ON f.DATINICCOVSTCET <= x.DataVisita AND f.DATFIMCCOVSTCET >= x.DataVisita
-                AND a.DESCCOVSTCET LIKE '%' + CAST(f.CODCCOVSTCET AS VARCHAR) + '%'
-            INNER JOIN dbo.IBETCET d 
-                ON a.CODCET = d.CODCET AND a.CODEMP = d.CODEMP
-            INNER JOIN dbo.IBETPDRGPOCMZMRCCET e 
-                ON a.CODEMP = e.CODEMP AND a.CODCET = e.CODCET AND a.CODGPOCMZMRC = e.CODGPOCMZMRC
-            INNER JOIN dbo.IBETCPLEPG epg 
-                ON epg.CODMTCEPG = e.CODMTCEPGVDD
-            LEFT JOIN dbo.IBETSBN sbn 
-                ON sbn.CODMTCEPGSBN = epg.CODMTCEPG
-            LEFT JOIN dbo.IBETCPLEPG sup 
-                ON sup.CODMTCEPG = sbn.CODMTCEPGRPS
-            LEFT JOIN ibetedrcet g ON a.codcet = g.codcet AND codtpoedr = 1
-            LEFT JOIN ibetcdd h ON g.codcdd = h.codcdd AND g.coduf_ = h.coduf_
-            LEFT JOIN ibetbro i ON g.codbro = i.codbro AND h.coduf_ = i.coduf_ AND h.codcdd = i.codcdd
-            WHERE d.TPOSTUCET = 'A' 
-              AND e.CODMTCEPGVDD NOT IN (881,333,444,555,666,888,998,999)
-            ORDER BY e.CODMTCEPGVDD, x.DataVisita
-            OPTION (MAXRECURSION 1000);
-        `;
-        
-        const params = [
-            { name: 'pStartDate', type: TYPES.Date, value: dateStart },
-            { name: 'pEndDate', type: TYPES.Date, value: dateEnd }
-        ];
-
-        // USA A CONFIG DO FLEXX AQUI
-        const { rows } = await executeQuery(flexxConfig, query, params);
-        res.json(rows);
-    } catch (e) {
-        console.error("Erro no roteirizador (Flexx):", e);
-        res.status(500).json({ message: "Erro ao consultar servidor externo: " + e.message });
-    }
-});
-
-// --- IMPORT PREVIEW (Integração MariaDB/MySQL Externo) ---
+// --- IMPORT PREVIEW (MariaDB) ---
 app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => {
     try {
-        // 1. Pega config do banco
+        // 1. Busca config do MariaDB no banco local
         const { rows } = await executeQuery(dbConfig, "SELECT ExtDb_Host, ExtDb_Port, ExtDb_User, ExtDb_Pass, ExtDb_Database, ExtDb_Query FROM SystemSettings WHERE ID = 1");
         const config = rows[0];
 
@@ -466,13 +239,14 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             return res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
         }
 
-        // 2. Conecta no MariaDB/MySQL externo
+        // 2. Conecta no MariaDB
         const conn = await mariadb.createConnection({
             host: config.ExtDb_Host,
             port: config.ExtDb_Port,
             user: config.ExtDb_User,
             password: config.ExtDb_Pass,
-            database: config.ExtDb_Database
+            database: config.ExtDb_Database,
+            connectTimeout: 5000
         });
 
         // 3. Executa Query
@@ -486,7 +260,6 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
         const alterados = [];
         const conflitos = [];
 
-        // Lógica de comparação simplificada
         externalRows.forEach(ext => {
             const local = localRows.find(l => l.ID_Pulsus == ext.id_pulsus);
             
@@ -498,10 +271,9 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
                     newData: { codigo_setor: ext.codigo_setor, grupo: ext.grupo }
                 });
             } else {
-                // Checa mudanças
                 const changes = [];
                 if (String(local.CodigoSetor) !== String(ext.codigo_setor)) changes.push({ field: 'Setor', oldValue: local.CodigoSetor, newValue: ext.codigo_setor });
-                // ... mais comparações se necessário
+                // Outras comparações podem ser adicionadas aqui
                 
                 if (changes.length > 0) {
                     alterados.push({
@@ -519,10 +291,238 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
         res.json({ novos, alterados, conflitos, totalExternal: externalRows.length });
 
     } catch (e) {
-        console.error('Erro Import Preview:', e);
-        // Retorna array vazio em caso de erro de conexão para não travar o front
+        console.error('Erro Import Preview (MariaDB):', e);
+        // Em caso de erro, retorna vazio para não quebrar a UI, mas loga no console
         res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
     }
+});
+
+// --- ROTEIRIZADOR (SQL Server Externo) ---
+app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
+    try {
+        const { startDate, endDate } = req.query;
+
+        let dateStart = startDate;
+        let dateEnd = endDate;
+
+        if (!dateStart || !dateEnd) {
+            const now = new Date();
+            const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+            const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            dateStart = firstDay.toISOString().split('T')[0];
+            dateEnd = lastDay.toISOString().split('T')[0];
+        }
+
+        // 1. Busca config do SQL Server Externo
+        const { rows: confRows } = await executeQuery(dbConfig, "SELECT ExtRoute_Host, ExtRoute_Port, ExtRoute_User, ExtRoute_Pass, ExtRoute_Database, ExtRoute_Query FROM SystemSettings WHERE ID = 1");
+        const configData = confRows[0];
+
+        if (!configData || !configData.ExtRoute_Host) {
+            throw new Error("Configuração de banco de dados do Roteirizador não encontrada no Painel Admin.");
+        }
+
+        // 2. Prepara Config do Tedious para o Banco Externo
+        const externalRouteConfig = {
+            server: configData.ExtRoute_Host,
+            authentication: {
+                type: 'default',
+                options: {
+                    userName: configData.ExtRoute_User,
+                    password: configData.ExtRoute_Pass
+                }
+            },
+            options: {
+                database: configData.ExtRoute_Database,
+                port: configData.ExtRoute_Port || 1433,
+                encrypt: false,
+                trustServerCertificate: true,
+                rowCollectionOnRequestCompletion: true,
+                requestTimeout: 60000 // 60s timeout para query pesada
+            }
+        };
+
+        // 3. Executa a Query configurada no Admin
+        // OBS: A query deve esperar parametros @pStartDate e @pEndDate
+        const query = configData.ExtRoute_Query;
+        
+        if (!query) {
+            throw new Error("Query SQL do Roteirizador não configurada.");
+        }
+
+        const params = [
+            { name: 'pStartDate', type: TYPES.Date, value: dateStart },
+            { name: 'pEndDate', type: TYPES.Date, value: dateEnd }
+        ];
+
+        // Usa a função executeQuery passando a config externa
+        const { rows } = await executeQuery(externalRouteConfig, query, params);
+        res.json(rows);
+
+    } catch (e) {
+        console.error("Erro no roteirizador (SQL Externo):", e);
+        res.status(500).json({ message: "Erro ao consultar servidor externo: " + e.message });
+    }
+});
+
+// --- OUTRAS ROTAS PADRÃO (Colaboradores, Fuel, Ausencias) ---
+// ... Mantidas iguais à implementação anterior, apenas copiando para integridade do arquivo ...
+
+app.get('/colaboradores', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await executeQuery(dbConfig, "SELECT * FROM Colaboradores WHERE Ativo = 1 ORDER BY Nome");
+        res.json(rows);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.post('/colaboradores', authenticateToken, async (req, res) => {
+    try {
+        const c = req.body;
+        const query = `INSERT INTO Colaboradores (ID_Pulsus, CodigoSetor, Nome, Grupo, TipoVeiculo, Ativo, UsuarioCriacao) VALUES (@idp, @cod, @nome, @grp, @tpo, @atv, @usr); SELECT SCOPE_IDENTITY() as id;`;
+        const params = [
+            { name: 'idp', type: TYPES.Int, value: c.ID_Pulsus },
+            { name: 'cod', type: TYPES.Int, value: c.CodigoSetor },
+            { name: 'nome', type: TYPES.NVarChar, value: c.Nome },
+            { name: 'grp', type: TYPES.NVarChar, value: c.Grupo },
+            { name: 'tpo', type: TYPES.NVarChar, value: c.TipoVeiculo },
+            { name: 'atv', type: TYPES.Bit, value: c.Ativo },
+            { name: 'usr', type: TYPES.NVarChar, value: 'API' }
+        ];
+        const { rows } = await executeQuery(dbConfig, query, params);
+        res.json({ ...c, ID_Colaborador: rows[0].id });
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.put('/colaboradores/:id', authenticateToken, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const c = req.body;
+        const query = `UPDATE Colaboradores SET ID_Pulsus=@idp, CodigoSetor=@cod, Nome=@nome, Grupo=@grp, TipoVeiculo=@tpo, Ativo=@atv, UsuarioAlteracao=@usr, DataAlteracao=GETDATE(), MotivoAlteracao=@mtv WHERE ID_Colaborador = @id`;
+        const params = [
+            { name: 'idp', type: TYPES.Int, value: c.ID_Pulsus },
+            { name: 'cod', type: TYPES.Int, value: c.CodigoSetor },
+            { name: 'nome', type: TYPES.NVarChar, value: c.Nome },
+            { name: 'grp', type: TYPES.NVarChar, value: c.Grupo },
+            { name: 'tpo', type: TYPES.NVarChar, value: c.TipoVeiculo },
+            { name: 'atv', type: TYPES.Bit, value: c.Ativo },
+            { name: 'usr', type: TYPES.NVarChar, value: 'API' },
+            { name: 'mtv', type: TYPES.NVarChar, value: c.MotivoAlteracao || 'Edição via Sistema' },
+            { name: 'id', type: TYPES.Int, value: id }
+        ];
+        await executeQuery(dbConfig, query, params);
+        res.json(c);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.get('/config/fuel', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await executeQuery(dbConfig, "SELECT * FROM ConfigReembolso WHERE ID = 1");
+        res.json(rows[0] || {});
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.put('/config/fuel', authenticateToken, async (req, res) => {
+    try {
+        const c = req.body;
+        const query = `UPDATE ConfigReembolso SET PrecoCombustivel=@p, KmL_Carro=@kc, KmL_Moto=@km, UsuarioAlteracao=@usr, DataAlteracao=GETDATE(), MotivoAlteracao=@mtv WHERE ID = 1`;
+        const params = [
+            { name: 'p', type: TYPES.Decimal, value: c.PrecoCombustivel },
+            { name: 'kc', type: TYPES.Decimal, value: c.KmL_Carro },
+            { name: 'km', type: TYPES.Decimal, value: c.KmL_Moto },
+            { name: 'usr', type: TYPES.NVarChar, value: 'API' },
+            { name: 'mtv', type: TYPES.NVarChar, value: c.MotivoAlteracao }
+        ];
+        await executeQuery(dbConfig, query, params);
+        await executeQuery(dbConfig, "INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES ('API', 'CONFIG_UPDATE', 'Atualização de parâmetros de combustível')");
+        res.sendStatus(200);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.get('/config/fuel/history', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await executeQuery(dbConfig, "SELECT TOP 10 * FROM LogsSistema WHERE Acao = 'CONFIG_UPDATE' ORDER BY DataHora DESC");
+        res.json(rows);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.get('/ausencias', authenticateToken, async (req, res) => {
+    try {
+        const query = `SELECT a.*, c.Nome as NomeColaborador, c.ID_Pulsus FROM ControleAusencias a INNER JOIN Colaboradores c ON a.ID_Colaborador = c.ID_Colaborador ORDER BY a.DataInicio DESC`;
+        const { rows } = await executeQuery(dbConfig, query);
+        res.json(rows);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.post('/ausencias', authenticateToken, async (req, res) => {
+    try {
+        const a = req.body;
+        const query = `INSERT INTO ControleAusencias (ID_Colaborador, DataInicio, DataFim, Motivo, UsuarioRegistro) VALUES (@idc, @di, @df, @mtv, @usr); SELECT SCOPE_IDENTITY() as id;`;
+        const params = [
+            { name: 'idc', type: TYPES.Int, value: a.ID_Colaborador },
+            { name: 'di', type: TYPES.Date, value: a.DataInicio },
+            { name: 'df', type: TYPES.Date, value: a.DataFim },
+            { name: 'mtv', type: TYPES.NVarChar, value: a.Motivo },
+            { name: 'usr', type: TYPES.NVarChar, value: 'API' }
+        ];
+        const { rows } = await executeQuery(dbConfig, query, params);
+        res.json({ ...a, ID_Ausencia: rows[0].id });
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
+    try {
+        const id = req.params.id;
+        await executeQuery(dbConfig, "DELETE FROM ControleAusencias WHERE ID_Ausencia = @id", [{ name: 'id', type: TYPES.Int, value: id }]);
+        res.sendStatus(200);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.get('/usuarios', authenticateToken, async (req, res) => {
+    try {
+        const { rows } = await executeQuery(dbConfig, "SELECT ID_Usuario, Nome, Usuario, Perfil, Ativo FROM Usuarios ORDER BY Nome");
+        res.json(rows);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.post('/usuarios', authenticateToken, async (req, res) => {
+    try {
+        const { Nome, Usuario, Senha, Perfil, Ativo } = req.body;
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(Senha, salt);
+        const query = `INSERT INTO Usuarios (Nome, Usuario, SenhaHash, Perfil, Ativo) VALUES (@n, @u, @s, @p, @a)`;
+        const params = [
+            { name: 'n', type: TYPES.NVarChar, value: Nome },
+            { name: 'u', type: TYPES.NVarChar, value: Usuario },
+            { name: 's', type: TYPES.NVarChar, value: hash },
+            { name: 'p', type: TYPES.NVarChar, value: Perfil },
+            { name: 'a', type: TYPES.Bit, value: Ativo }
+        ];
+        await executeQuery(dbConfig, query, params);
+        res.sendStatus(200);
+    } catch (e) { res.status(500).json({ message: e.message }); }
+});
+
+app.put('/usuarios/:id', authenticateToken, async (req, res) => {
+    try {
+        const id = req.params.id;
+        const { Nome, Usuario, Senha, Perfil, Ativo } = req.body;
+        let query = `UPDATE Usuarios SET Nome=@n, Usuario=@u, Perfil=@p, Ativo=@a`;
+        const params = [
+            { name: 'n', type: TYPES.NVarChar, value: Nome },
+            { name: 'u', type: TYPES.NVarChar, value: Usuario },
+            { name: 'p', type: TYPES.NVarChar, value: Perfil },
+            { name: 'a', type: TYPES.Bit, value: Ativo },
+            { name: 'id', type: TYPES.Int, value: id }
+        ];
+        if (Senha) {
+            const salt = await bcrypt.genSalt(10);
+            const hash = await bcrypt.hash(Senha, salt);
+            query += `, SenhaHash=@s`;
+            params.push({ name: 's', type: TYPES.NVarChar, value: hash });
+        }
+        query += ` WHERE ID_Usuario = @id`;
+        await executeQuery(dbConfig, query, params);
+        res.sendStatus(200);
+    } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
 // Inicia Servidor
