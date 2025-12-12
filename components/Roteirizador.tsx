@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { getVisitasPrevistas } from '../services/apiService.ts';
@@ -91,9 +92,17 @@ export const Roteirizador: React.FC = () => {
                 
                 // Group by Date (YYYY-MM-DD)
                 visits.forEach(v => {
-                    const dateKey = new Date(v.Data_da_Visita).toISOString().split('T')[0];
-                    if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
-                    daysMap.get(dateKey)?.push(v);
+                    if (!v.Data_da_Visita) return;
+                    try {
+                        const d = new Date(v.Data_da_Visita);
+                        if (isNaN(d.getTime())) return;
+                        const dateKey = d.toISOString().split('T')[0];
+                        
+                        if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
+                        daysMap.get(dateKey)?.push(v);
+                    } catch (e) {
+                        console.warn('Data inválida ignorada', v);
+                    }
                 });
 
                 const daysSummary: DayRouteSummary[] = [];

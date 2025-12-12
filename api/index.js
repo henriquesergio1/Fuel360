@@ -582,7 +582,43 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
         ];
 
         const { rows } = await executeQuery(externalRouteConfig, configData.ExtRoute_Query, params);
-        res.json(rows);
+        
+        // Mapeamento de Colunas (Case Insensitive e Aliases Comuns)
+        const mappedRows = rows.map(r => {
+            const getVal = (candidates) => {
+                for (const key of Object.keys(r)) {
+                    if (candidates.includes(key.toUpperCase())) return r[key];
+                }
+                return null;
+            };
+
+            return {
+                Cod_Vend: getVal(['COD_VEND', 'ID_VENDEDOR', 'VENDEDOR_ID']) || 0,
+                Nome_Vendedor: getVal(['NOME_VENDEDOR', 'VENDEDOR', 'NOME']) || 'Desconhecido',
+                Cod_Supervisor: getVal(['COD_SUPERVISOR', 'ID_SUPERVISOR']) || 0,
+                Nome_Supervisor: getVal(['NOME_SUPERVISOR', 'SUPERVISOR']) || '',
+                Cod_Cliente: getVal(['COD_CLIENTE', 'ID_CLIENTE', 'CLIENTE_ID']) || 0,
+                Razao_Social: getVal(['RAZAO_SOCIAL', 'CLIENTE', 'NOME_FANTASIA', 'NOME_CLIENTE']) || 'Cliente',
+                Dia_Semana: getVal(['DIA_SEMANA', 'DIA']) || '',
+                Periodicidade: getVal(['PERIODICIDADE']) || '',
+                // Tratamento de Data seguro para serialização JSON
+                Data_da_Visita: (() => {
+                    const raw = getVal(['DATA_DA_VISITA', 'DATA', 'DT_VISITA', 'DATA_VISITA', 'DATA DA VISITA']);
+                    if (raw instanceof Date) {
+                        return isNaN(raw.getTime()) ? null : raw;
+                    }
+                    return raw;
+                })(),
+                Endereco: getVal(['ENDERECO', 'LOGRADOURO']) || '',
+                Bairro: getVal(['BAIRRO']) || '',
+                Cidade: getVal(['CIDADE', 'MUNICIPIO']) || '',
+                CEP: getVal(['CEP']) || '',
+                Lat: getVal(['LAT', 'LATITUDE']) || 0,
+                Long: getVal(['LONG', 'LONGITUDE', 'LNG']) || 0
+            };
+        });
+
+        res.json(mappedRows);
 
     } catch (e) {
         console.error("Erro roteirizador:", e);
