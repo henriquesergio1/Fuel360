@@ -79,6 +79,30 @@ function executeQuery(config, query, params = []) {
 // Tipos do Tedious para Parâmetros
 const TYPES = require('tedious').TYPES;
 
+// --- AUTO-MIGRAÇÃO DE SCHEMA ---
+async function ensureSchema() {
+    console.log('Verificando integridade do banco de dados...');
+    try {
+        const query = `
+            IF NOT EXISTS(SELECT * FROM sys.columns WHERE Name = N'ExtRoute_Host' AND Object_ID = Object_ID(N'SystemSettings'))
+            BEGIN
+                ALTER TABLE SystemSettings ADD 
+                    ExtRoute_Host NVARCHAR(255),
+                    ExtRoute_Port INT DEFAULT 1433,
+                    ExtRoute_User NVARCHAR(100),
+                    ExtRoute_Pass NVARCHAR(255),
+                    ExtRoute_Database NVARCHAR(100),
+                    ExtRoute_Query NVARCHAR(MAX);
+                PRINT 'Colunas ExtRoute adicionadas com sucesso.';
+            END
+        `;
+        await executeQuery(dbConfig, query);
+        console.log('Schema verificado.');
+    } catch (e) {
+        console.error('Erro na verificação de schema:', e.message);
+    }
+}
+
 // --- MIDDLEWARES ---
 function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
@@ -197,6 +221,9 @@ app.put('/system/integration', authenticateToken, async (req, res) => {
     try {
         const { colab, route } = req.body;
         
+        // Garante que o schema existe antes de tentar update
+        await ensureSchema();
+
         const query = `
             UPDATE SystemSettings SET 
                 ExtDb_Host = @ch, ExtDb_Port = @cp, ExtDb_User = @cu, ExtDb_Pass = @cpass, ExtDb_Database = @cd, ExtDb_Query = @cq,
@@ -206,25 +233,26 @@ app.put('/system/integration', authenticateToken, async (req, res) => {
         
         const params = [
             // Colaboradores (MariaDB)
-            { name: 'ch', type: TYPES.NVarChar, value: colab.host },
-            { name: 'cp', type: TYPES.Int, value: colab.port },
-            { name: 'cu', type: TYPES.NVarChar, value: colab.user },
-            { name: 'cpass', type: TYPES.NVarChar, value: colab.pass },
-            { name: 'cd', type: TYPES.NVarChar, value: colab.database },
-            { name: 'cq', type: TYPES.NVarChar, value: colab.query },
+            { name: 'ch', type: TYPES.NVarChar, value: colab.host || '' },
+            { name: 'cp', type: TYPES.Int, value: parseInt(colab.port) || 3306 },
+            { name: 'cu', type: TYPES.NVarChar, value: colab.user || '' },
+            { name: 'cpass', type: TYPES.NVarChar, value: colab.pass || '' },
+            { name: 'cd', type: TYPES.NVarChar, value: colab.database || '' },
+            { name: 'cq', type: TYPES.NVarChar, value: colab.query || '' },
             // Rota (SQL Server)
-            { name: 'rh', type: TYPES.NVarChar, value: route.host },
-            { name: 'rp', type: TYPES.Int, value: route.port },
-            { name: 'ru', type: TYPES.NVarChar, value: route.user },
-            { name: 'rpass', type: TYPES.NVarChar, value: route.pass },
-            { name: 'rd', type: TYPES.NVarChar, value: route.database },
-            { name: 'rq', type: TYPES.NVarChar, value: route.query }
+            { name: 'rh', type: TYPES.NVarChar, value: route.host || '' },
+            { name: 'rp', type: TYPES.Int, value: parseInt(route.port) || 1433 },
+            { name: 'ru', type: TYPES.NVarChar, value: route.user || '' },
+            { name: 'rpass', type: TYPES.NVarChar, value: route.pass || '' },
+            { name: 'rd', type: TYPES.NVarChar, value: route.database || '' },
+            { name: 'rq', type: TYPES.NVarChar, value: route.query || '' }
         ];
 
         await executeQuery(dbConfig, query, params);
         res.sendStatus(200);
     } catch (e) {
-        res.status(500).json({ message: e.message });
+        console.error("Erro ao salvar integração:", e);
+        res.status(500).json({ message: e.message || 'Erro interno ao salvar configurações.' });
     }
 });
 
@@ -292,7 +320,7 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
 
     } catch (e) {
         console.error('Erro Import Preview (MariaDB):', e);
-        // Em caso de erro, retorna vazio para não quebrar a UI, mas loga no console
+        // Em caso de erro, retorna array vazio para não quebrar a UI
         res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
     }
 });
@@ -314,6 +342,8 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
         }
 
         // 1. Busca config do SQL Server Externo
+        // Se as colunas não existirem, o query pode falhar se o auto-migration não tiver rodado.
+        // O ensureSchema roda no start, mas aqui podemos tratar erro.
         const { rows: confRows } = await executeQuery(dbConfig, "SELECT ExtRoute_Host, ExtRoute_Port, ExtRoute_User, ExtRoute_Pass, ExtRoute_Database, ExtRoute_Query FROM SystemSettings WHERE ID = 1");
         const configData = confRows[0];
 
@@ -342,7 +372,6 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
         };
 
         // 3. Executa a Query configurada no Admin
-        // OBS: A query deve esperar parametros @pStartDate e @pEndDate
         const query = configData.ExtRoute_Query;
         
         if (!query) {
@@ -364,8 +393,7 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
     }
 });
 
-// --- OUTRAS ROTAS PADRÃO (Colaboradores, Fuel, Ausencias) ---
-// ... Mantidas iguais à implementação anterior, apenas copiando para integridade do arquivo ...
+// --- OUTRAS ROTAS PADRÃO ---
 
 app.get('/colaboradores', authenticateToken, async (req, res) => {
     try {
@@ -525,7 +553,8 @@ app.put('/usuarios/:id', authenticateToken, async (req, res) => {
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
-// Inicia Servidor
-app.listen(API_PORT, () => {
+// Inicia Servidor e Verifica Schema
+app.listen(API_PORT, async () => {
     console.log(`API Fuel360 rodando na porta ${API_PORT}`);
+    await ensureSchema();
 });
