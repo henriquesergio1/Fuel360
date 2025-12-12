@@ -18,7 +18,17 @@ import {
 } from '../types';
 import * as mockApiData from '../api/mockData.ts';
 
-const API_BASE_URL = 'http://localhost:3031';
+// LÓGICA DE URL DINÂMICA
+// Se estiver rodando localmente (dev sem docker), usa a porta 3031 direta.
+// Se estiver em produção (Docker/Nginx na porta 8081), usa o proxy relativo '/api'
+const getBaseUrl = () => {
+    if (typeof window !== 'undefined' && window.location.hostname === 'localhost' && window.location.port !== '8081') {
+        return 'http://localhost:3031';
+    }
+    return '/api';
+};
+
+const API_BASE_URL = getBaseUrl();
 const MODE_KEY = 'FUEL360_API_MODE';
 
 export const getCurrentMode = (): 'MOCK' | 'API' => {
