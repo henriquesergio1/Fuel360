@@ -129,6 +129,16 @@ export const Roteirizador: React.FC = () => {
         const filtered = rawData.filter(v => {
             if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return false;
             if (selectedVendedor && String(v.Cod_Vend) !== selectedVendedor) return false;
+            
+            // Filter by Date (Safety Check ensuring data matches selected range)
+            if (v.Data_da_Visita) {
+                try {
+                    const d = new Date(v.Data_da_Visita);
+                    const dStr = d.toISOString().split('T')[0];
+                    if (dStr < startDate || dStr > endDate) return false;
+                } catch(e) { return false; }
+            }
+
             return true;
         });
 
@@ -193,7 +203,7 @@ export const Roteirizador: React.FC = () => {
         }
 
         return summaries.sort((a, b) => a.name.localeCompare(b.name));
-    }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor]);
+    }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor, startDate, endDate]);
 
     const toggleExpand = (id: number) => {
         const newSet = new Set(expandedSellers);

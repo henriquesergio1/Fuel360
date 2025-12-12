@@ -1,4 +1,5 @@
 
+
 const express = require('express');
 const cors = require('cors');
 const { Request, Connection } = require('tedious');
@@ -607,6 +608,11 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
                     if (raw instanceof Date) {
                         return isNaN(raw.getTime()) ? null : raw;
                     }
+                    if (typeof raw === 'string') {
+                        // Tenta converter string para data para validação
+                        const d = new Date(raw);
+                        return isNaN(d.getTime()) ? null : d;
+                    }
                     return raw;
                 })(),
                 Endereco: getVal(['ENDERECO', 'LOGRADOURO']) || '',
@@ -618,7 +624,21 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
             };
         });
 
-        res.json(mappedRows);
+        // Filtro de Segurança (Backend Side)
+        // Garante que os dados retornados estejam dentro do intervalo solicitado,
+        // caso a query SQL personalizada do usuário ignore os parâmetros @pStartDate e @pEndDate.
+        const filteredRows = mappedRows.filter(r => {
+            if (!r.Data_da_Visita) return false;
+            try {
+                // Normaliza para YYYY-MM-DD para comparação de string
+                const d = new Date(r.Data_da_Visita);
+                if (isNaN(d.getTime())) return false;
+                const dStr = d.toISOString().split('T')[0];
+                return dStr >= dateStart && dStr <= dateEnd;
+            } catch(e) { return false; }
+        });
+
+        res.json(filteredRows);
 
     } catch (e) {
         console.error("Erro roteirizador:", e);
