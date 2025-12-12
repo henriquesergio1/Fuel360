@@ -31,9 +31,13 @@ const MapRecenter: React.FC<{ coords: [number, number][] }> = ({ coords }) => {
 const MapFix = () => {
     const map = useMap();
     useEffect(() => {
+        // Executa imediatamente para tentar ajustar
+        map.invalidateSize();
+        
+        // Executa novamente após um delay maior para garantir que animações CSS terminaram
         const timeout = setTimeout(() => {
             map.invalidateSize();
-        }, 100); // Pequeno delay para garantir que o DOM pintou o container
+        }, 400); 
         return () => clearTimeout(timeout);
     }, [map]);
     return null;
@@ -268,9 +272,11 @@ export const Roteirizador: React.FC = () => {
                 </div>
                 
                 {/* 
-                    FIX: Leaflet container needs explicit height and MapFix component
+                    FIX: Leaflet container needs explicit height. 
+                    Using 'flex-1' and 'min-h-0' is usually safer for flexbox children.
+                    MapFix component ensures invalidateSize is called.
                 */}
-                <div className="flex-1 relative z-0 w-full h-[calc(100vh-200px)] min-h-[500px]">
+                <div className="flex-1 w-full relative min-h-0 bg-slate-100">
                     <MapContainer 
                         key={viewingRoute.date}
                         center={centerPos} 
