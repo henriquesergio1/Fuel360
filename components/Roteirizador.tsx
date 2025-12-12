@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import { getVisitasPrevistas } from '../services/apiService.ts';
 import { VisitaPrevista } from '../types.ts';
-import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, ChevronRightIcon, ChevronDownIcon, ArrowLeftIcon, UserGroupIcon, UserIcon, PrinterIcon, ExclamationIcon } from './icons.tsx';
+import { LocationMarkerIcon, SpinnerIcon, CalculatorIcon, ChevronRightIcon, ChevronDownIcon, ArrowLeftIcon, UserGroupIcon, UserIcon, PrinterIcon, ExclamationIcon, CogIcon } from './icons.tsx';
 import L from 'leaflet';
 
 // --- CONFIGURAÇÃO GLOBAL LEAFLET ---
@@ -35,8 +35,63 @@ const formatDate = (iso: string) => {
     } catch(e) { return iso; }
 };
 
+// --- ALGORITMO DE OTIMIZAÇÃO DE ROTA (TSP HEURISTIC - NEAREST NEIGHBOR) ---
+const optimizeRoute = (points: VisitaPrevista[]): VisitaPrevista[] => {
+    // 1. Filtra pontos sem coordenadas válidas
+    const validPoints = points.filter(p => p.Lat && p.Long && !isNaN(p.Lat) && !isNaN(p.Long) && p.Lat !== 0 && p.Long !== 0);
+    
+    // Se tiver 0, 1 ou 2 pontos, a ordem não altera a distância total (A->B é igual B->A)
+    if (validPoints.length <= 2) return validPoints;
+
+    let bestOrder: VisitaPrevista[] = [...validPoints];
+    let minTotalDist = Infinity;
+
+    // 2. Heurística Multi-Start:
+    // Tenta começar a rota em CADA um dos pontos disponíveis.
+    // Isso evita que o algoritmo fique preso num "início ruim" que obrigue a cruzar a cidade.
+    for (let i = 0; i < validPoints.length; i++) {
+        const currentPath = [validPoints[i]];
+        const visitedIndices = new Set([i]); // Usa índice do array validPoints
+        let currentDist = 0;
+        let currentPoint = validPoints[i];
+
+        // Enquanto houver pontos não visitados
+        while (visitedIndices.size < validPoints.length) {
+            let nearestIdx = -1;
+            let minDist = Infinity;
+
+            // Encontra o vizinho mais próximo do ponto atual
+            for (let j = 0; j < validPoints.length; j++) {
+                if (!visitedIndices.has(j)) {
+                    const d = calcDistance(currentPoint.Lat, currentPoint.Long, validPoints[j].Lat, validPoints[j].Long);
+                    if (d < minDist) {
+                        minDist = d;
+                        nearestIdx = j;
+                    }
+                }
+            }
+
+            if (nearestIdx !== -1) {
+                currentDist += minDist;
+                currentPoint = validPoints[nearestIdx];
+                currentPath.push(currentPoint);
+                visitedIndices.add(nearestIdx);
+            } else {
+                break; 
+            }
+        }
+
+        // Se este caminho for melhor que o recorde anterior, salva ele
+        if (currentDist < minTotalDist) {
+            minTotalDist = currentDist;
+            bestOrder = currentPath;
+        }
+    }
+
+    return bestOrder;
+};
+
 // --- COMPONENTE INTERNO: MAP AUTO-FIT ---
-// Apenas ajusta o zoom, não lida com resize
 const MapAutoFit: React.FC<{ points: VisitaPrevista[] }> = ({ points }) => {
     const map = useMap();
     
@@ -50,28 +105,25 @@ const MapAutoFit: React.FC<{ points: VisitaPrevista[] }> = ({ points }) => {
                 }
             }
         }
-        // Force redraw once
         map.invalidateSize();
     }, [map, points]);
 
     return null;
 };
 
-// --- COMPONENTE: MODAL DO MAPA (ISOLADO) ---
+// --- COMPONENTE: MODAL DO MAPA ---
 const MapModal: React.FC<{ 
     route: any; 
     onClose: () => void; 
 }> = ({ route, onClose }) => {
-    // ESTADO DE MONTAGEM TARDIA (CRÍTICO PARA CORRIGIR TELA CINZA)
     const [isMounted, setIsMounted] = useState(false);
 
     useEffect(() => {
-        // Aguarda 300ms para garantir que o Modal CSS (width/height) foi aplicado
-        // antes de tentar renderizar o Leaflet.
         const timer = setTimeout(() => setIsMounted(true), 300);
         return () => clearTimeout(timer);
     }, []);
 
+    // A rota já vem otimizada do componente pai
     const points = route.validPoints as VisitaPrevista[];
     const hasPoints = points.length > 0;
     const centerPos: [number, number] = hasPoints ? [points[0].Lat, points[0].Long] : [-23.55, -46.63];
@@ -89,9 +141,15 @@ const MapModal: React.FC<{
                             <span className="font-mono mr-2">{formatDate(route.date)}</span>
                             <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded uppercase">{route.dayName}</span>
                         </h2>
-                        <p className="text-xs text-slate-500">
-                            {route.points.length} Visitas ({points.length} GPS) • <strong>{route.km.toFixed(1)} km</strong>
-                        </p>
+                        <div className="flex items-center space-x-2 text-xs text-slate-500">
+                            <span>{points.length} Visitas</span>
+                            <span>•</span>
+                            <span className="flex items-center text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                                <CogIcon className="w-3 h-3 mr-1"/> Rota Otimizada (Menor Distância)
+                            </span>
+                            <span>•</span>
+                            <strong>{route.km.toFixed(1)} km estim.</strong>
+                        </div>
                     </div>
                 </div>
                 <div className="flex gap-2">
@@ -108,17 +166,16 @@ const MapModal: React.FC<{
             <div className="relative flex-1 bg-slate-100 w-full overflow-hidden">
                 {/* Debug Panel */}
                 <div className="absolute top-4 right-4 z-[9999] bg-white/90 backdrop-blur border border-slate-300 p-3 rounded shadow-lg text-xs font-mono pointer-events-none">
-                    <p className="font-bold border-b border-slate-300 mb-1">Diagnóstico Mapa</p>
-                    <p>Status: {isMounted ? 'Montado' : 'Carregando...'}</p>
-                    <p>Pontos Válidos: {points.length}</p>
-                    {hasPoints && <p>Centro: {centerPos[0].toFixed(4)}, {centerPos[1].toFixed(4)}</p>}
+                    <p className="font-bold border-b border-slate-300 mb-1">Status da Rota</p>
+                    <p className="text-emerald-600 font-bold">Otimização Ativa</p>
+                    <p>Pontos: {points.length}</p>
                 </div>
 
                 {!isMounted && (
                     <div className="absolute inset-0 flex items-center justify-center bg-slate-50 z-50">
                         <div className="flex flex-col items-center animate-pulse">
                             <SpinnerIcon className="w-10 h-10 text-blue-600 mb-2"/>
-                            <span className="text-sm font-bold text-slate-400">Carregando Mapa...</span>
+                            <span className="text-sm font-bold text-slate-400">Desenhando melhor rota...</span>
                         </div>
                     </div>
                 )}
@@ -132,20 +189,18 @@ const MapModal: React.FC<{
                     >
                         <MapAutoFit points={points} />
                         
-                        {/* CartoDB Voyager - Mais rápido e limpo que OSM padrão */}
                         <TileLayer 
-                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                            attribution='&copy; CARTO'
                             url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" 
                         />
 
-                        {/* Rota (Azul) */}
+                        {/* Rota Otimizada (Azul) */}
                         <Polyline 
                             positions={points.map(p => [p.Lat, p.Long])}
                             color="#2563eb"
                             weight={5}
                             opacity={0.8}
                         />
-                        {/* Efeito Tracejado Branco */}
                         <Polyline 
                             positions={points.map(p => [p.Lat, p.Long])}
                             color="white"
@@ -154,17 +209,16 @@ const MapModal: React.FC<{
                             dashArray="5, 10"
                         />
 
-                        {/* Marcadores */}
+                        {/* Marcadores Numerados pela Ordem Otimizada */}
                         {points.map((p, idx) => (
                             <Marker key={`${idx}-${p.Lat}`} position={[p.Lat, p.Long]}>
                                 <Popup>
                                     <div className="min-w-[200px]">
-                                        <p className="font-bold text-sm border-b pb-1 mb-1 text-slate-800">{idx + 1}. {p.Razao_Social}</p>
+                                        <p className="font-bold text-sm border-b pb-1 mb-1 text-slate-800">
+                                            <span className="bg-blue-600 text-white rounded-full w-5 h-5 inline-flex items-center justify-center text-xs mr-2 font-bold">{idx + 1}</span>
+                                            {p.Razao_Social}
+                                        </p>
                                         <p className="text-xs text-slate-600 mb-0.5"><strong>End:</strong> {p.Endereco}</p>
-                                        <div className="mt-1 flex justify-between text-[10px] text-slate-400">
-                                            <span>Lat: {p.Lat.toFixed(5)}</span>
-                                            <span>Lon: {p.Long.toFixed(5)}</span>
-                                        </div>
                                     </div>
                                 </Popup>
                             </Marker>
@@ -175,7 +229,7 @@ const MapModal: React.FC<{
                         <ExclamationIcon className="w-16 h-16 mb-4 opacity-50"/>
                         <h3 className="text-xl font-bold">Sem Coordenadas</h3>
                         <p className="max-w-md text-center mt-2">
-                            Os endereços desta rota não possuem latitude/longitude válidas no cadastro.
+                            Os endereços desta rota não possuem latitude/longitude válidas.
                         </p>
                     </div>
                 )}
@@ -186,7 +240,6 @@ const MapModal: React.FC<{
 
 // --- COMPONENTE PRINCIPAL ---
 export const Roteirizador: React.FC = () => {
-    // --- ESTADOS ---
     const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
     const [endDate, setEndDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0]);
     const [tortuosityFactor, setTortuosityFactor] = useState(1.3);
@@ -196,11 +249,8 @@ export const Roteirizador: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [rawData, setRawData] = useState<VisitaPrevista[]>([]);
     const [expandedSellers, setExpandedSellers] = useState<Set<number>>(new Set());
-    
-    // Rota Selecionada para o Modal
     const [viewingRoute, setViewingRoute] = useState<any | null>(null);
 
-    // --- CARREGAMENTO DE DADOS ---
     const handleCalculate = async () => {
         setLoading(true);
         setRawData([]);
@@ -216,7 +266,6 @@ export const Roteirizador: React.FC = () => {
         }
     };
 
-    // --- FILTROS ---
     const supervisors = useMemo(() => {
         const map = new Map<number, string>();
         rawData.forEach(v => map.set(v.Cod_Supervisor, v.Nome_Supervisor));
@@ -233,7 +282,7 @@ export const Roteirizador: React.FC = () => {
         return Array.from(map.entries()).sort((a, b) => a[0] - b[0]);
     }, [rawData, selectedSupervisor]);
 
-    // --- PROCESSAMENTO ---
+    // --- PROCESSAMENTO E OTIMIZAÇÃO AUTOMÁTICA ---
     const groupedData = useMemo(() => {
         if (rawData.length === 0) return [];
 
@@ -274,16 +323,15 @@ export const Roteirizador: React.FC = () => {
             const daysArr = [];
             let totalKm = 0;
 
-            for (const [date, visits] of seller.days.entries()) {
-                const validPoints = (visits as VisitaPrevista[]).filter(p => 
-                    p.Lat !== undefined && p.Long !== undefined && 
-                    !isNaN(p.Lat) && !isNaN(p.Long) &&
-                    p.Lat !== 0 && p.Long !== 0
-                );
+            for (const [date, rawVisits] of seller.days.entries()) {
+                // *** AQUI ACONTECE A MÁGICA ***
+                // Ignora a ordem do banco e REORGANIZA para a menor rota possível
+                const optimizedPoints = optimizeRoute(rawVisits as VisitaPrevista[]);
                 
                 let kmReta = 0;
-                for (let i = 0; i < validPoints.length - 1; i++) {
-                    kmReta += calcDistance(validPoints[i].Lat, validPoints[i].Long, validPoints[i+1].Lat, validPoints[i+1].Long);
+                // Calcula distância na ordem OTIMIZADA
+                for (let i = 0; i < optimizedPoints.length - 1; i++) {
+                    kmReta += calcDistance(optimizedPoints[i].Lat, optimizedPoints[i].Long, optimizedPoints[i+1].Lat, optimizedPoints[i+1].Long);
                 }
                 
                 const kmEst = kmReta * tortuosityFactor;
@@ -291,10 +339,10 @@ export const Roteirizador: React.FC = () => {
 
                 daysArr.push({
                     date: date,
-                    dayName: (visits as any[])[0].Dia_Semana || '',
+                    dayName: (rawVisits as any[])[0].Dia_Semana || '',
                     km: kmEst,
-                    points: visits,
-                    validPoints: validPoints
+                    points: rawVisits, // Mantém original se quiser ver a lista completa
+                    validPoints: optimizedPoints // Lista OTIMIZADA para o mapa e visualização
                 });
             }
             
@@ -308,16 +356,14 @@ export const Roteirizador: React.FC = () => {
         return result.sort((a, b) => a.id - b.id);
     }, [rawData, selectedSupervisor, selectedVendedor, tortuosityFactor]);
 
-    // --- RENDERIZAÇÃO ---
     return (
         <div className="space-y-6 animate-fade-in">
-            {/* Modal Condicional */}
             {viewingRoute && <MapModal route={viewingRoute} onClose={() => setViewingRoute(null)} />}
 
             <div className="flex justify-between items-end">
                 <div>
-                    <h2 className="text-3xl font-extrabold text-slate-800 mb-1 tracking-tight">Roteirizador Previsto</h2>
-                    <p className="text-slate-500 font-medium">Análise de quilometragem teórica baseada na agenda.</p>
+                    <h2 className="text-3xl font-extrabold text-slate-800 mb-1 tracking-tight">Roteirizador Otimizado</h2>
+                    <p className="text-slate-500 font-medium">O sistema reorganiza automaticamente as visitas para encontrar o menor caminho.</p>
                 </div>
             </div>
 
@@ -341,7 +387,7 @@ export const Roteirizador: React.FC = () => {
                         className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-lg shadow-md flex items-center transition disabled:opacity-50"
                     >
                         {loading ? <SpinnerIcon className="w-5 h-5 mr-2"/> : <CalculatorIcon className="w-5 h-5 mr-2"/>}
-                        Calcular Rota
+                        Otimizar & Calcular
                     </button>
                 </div>
 
@@ -373,13 +419,13 @@ export const Roteirizador: React.FC = () => {
                             <th className="p-4">Vendedor (Cód - Nome)</th>
                             <th className="p-4">Supervisor (Cód - Nome)</th>
                             <th className="p-4 text-center">Dias Calc.</th>
-                            <th className="p-4 text-right">KM Total</th>
+                            <th className="p-4 text-right">KM Otimizado</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {groupedData.length === 0 ? (
                             <tr><td colSpan={5} className="p-12 text-center text-slate-400">
-                                {loading ? "Processando..." : "Nenhuma rota calculada. Selecione o período e clique em Calcular."}
+                                {loading ? "Otimizando rotas..." : "Nenhuma rota calculada. Selecione o período e clique em Calcular."}
                             </td></tr>
                         ) : (
                             groupedData.map(seller => {
@@ -418,7 +464,7 @@ export const Roteirizador: React.FC = () => {
                                                                     <th className="px-8 py-2 text-left w-48">Data</th>
                                                                     <th className="px-4 py-2 text-center">Visitas</th>
                                                                     <th className="px-4 py-2 text-center">Coords OK</th>
-                                                                    <th className="px-4 py-2 text-right">KM Est.</th>
+                                                                    <th className="px-4 py-2 text-right">KM Otim.</th>
                                                                     <th className="px-4 py-2 text-center">Ação</th>
                                                                 </tr>
                                                             </thead>
@@ -443,7 +489,7 @@ export const Roteirizador: React.FC = () => {
                                                                                     onClick={(e) => { e.stopPropagation(); setViewingRoute(day); }}
                                                                                     className="inline-flex items-center bg-white border border-blue-200 text-blue-600 hover:bg-blue-50 hover:text-blue-800 px-3 py-1 rounded text-[10px] font-bold uppercase shadow-sm transition"
                                                                                 >
-                                                                                    <LocationMarkerIcon className="w-3 h-3 mr-1"/> Ver Rota
+                                                                                    <LocationMarkerIcon className="w-3 h-3 mr-1"/> Ver Mapa Otimizado
                                                                                 </button>
                                                                             </td>
                                                                         </tr>
