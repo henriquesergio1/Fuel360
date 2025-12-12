@@ -24,12 +24,6 @@ services:
       - DB_USER_FUEL360=${DB_USER_FUEL360}
       - DB_PASSWORD_FUEL360=${DB_PASSWORD_FUEL360}
 
-      # Conexão Secundária (Banco Flexx - consulta.flagcloud.com.br)
-      - DB_SERVER_FLEXX=${DB_SERVER_FLEXX}
-      - DB_DATABASE_FLEXX=${DB_DATABASE_FLEXX:-FLEXX10071188}
-      - DB_USER_FLEXX=${DB_USER_FLEXX}
-      - DB_PASSWORD_FLEXX=${DB_PASSWORD_FLEXX}
-
   fuel360-frontend:
     build:
       context: . # Constrói a imagem a partir da raiz do projeto

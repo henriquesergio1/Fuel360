@@ -15,6 +15,7 @@ const API_PORT = process.env.API_PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'secret-dev';
 
 // --- CONFIGURAÇÃO BANCO LOCAL (FUEL360 - SQL Server Interno) ---
+// Apenas as credenciais do banco principal do App ficam no ENV
 const dbConfig = {
     server: process.env.DB_SERVER_FUEL360 || '10.10.10.100',
     authentication: {
@@ -173,7 +174,7 @@ app.put('/system/config', authenticateToken, async (req, res) => {
             { name: 'c', type: TYPES.NVarChar, value: companyName },
             { name: 'l', type: TYPES.NVarChar, value: logoUrl }
         ]);
-        res.sendStatus(200);
+        res.json({ success: true });
     } catch (e) {
         res.status(500).json({ message: e.message });
     }
@@ -196,7 +197,7 @@ app.get('/system/integration', authenticateToken, async (req, res) => {
                 host: data.ExtDb_Host || '',
                 port: data.ExtDb_Port || 3306,
                 user: data.ExtDb_User || '',
-                pass: data.ExtDb_Pass || '', // Senha enviada para exibição no front (cuidado em prod real)
+                pass: data.ExtDb_Pass || '',
                 database: data.ExtDb_Database || '',
                 query: data.ExtDb_Query || '',
                 type: 'MARIADB'
@@ -221,7 +222,6 @@ app.put('/system/integration', authenticateToken, async (req, res) => {
     try {
         const { colab, route } = req.body;
         
-        // Garante que o schema existe antes de tentar update
         await ensureSchema();
 
         const query = `
@@ -249,7 +249,7 @@ app.put('/system/integration', authenticateToken, async (req, res) => {
         ];
 
         await executeQuery(dbConfig, query, params);
-        res.sendStatus(200);
+        res.json({ success: true, message: 'Configurações salvas com sucesso' });
     } catch (e) {
         console.error("Erro ao salvar integração:", e);
         res.status(500).json({ message: e.message || 'Erro interno ao salvar configurações.' });
@@ -259,7 +259,6 @@ app.put('/system/integration', authenticateToken, async (req, res) => {
 // --- IMPORT PREVIEW (MariaDB) ---
 app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => {
     try {
-        // 1. Busca config do MariaDB no banco local
         const { rows } = await executeQuery(dbConfig, "SELECT ExtDb_Host, ExtDb_Port, ExtDb_User, ExtDb_Pass, ExtDb_Database, ExtDb_Query FROM SystemSettings WHERE ID = 1");
         const config = rows[0];
 
@@ -267,7 +266,6 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             return res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
         }
 
-        // 2. Conecta no MariaDB
         const conn = await mariadb.createConnection({
             host: config.ExtDb_Host,
             port: config.ExtDb_Port,
@@ -277,11 +275,9 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             connectTimeout: 5000
         });
 
-        // 3. Executa Query
         const externalRows = await conn.query(config.ExtDb_Query);
         conn.end();
 
-        // 4. Compara com banco local
         const { rows: localRows } = await executeQuery(dbConfig, "SELECT * FROM Colaboradores WHERE Ativo = 1");
 
         const novos = [];
@@ -301,7 +297,6 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
             } else {
                 const changes = [];
                 if (String(local.CodigoSetor) !== String(ext.codigo_setor)) changes.push({ field: 'Setor', oldValue: local.CodigoSetor, newValue: ext.codigo_setor });
-                // Outras comparações podem ser adicionadas aqui
                 
                 if (changes.length > 0) {
                     alterados.push({
@@ -320,7 +315,6 @@ app.get('/colaboradores/import-preview', authenticateToken, async (req, res) => 
 
     } catch (e) {
         console.error('Erro Import Preview (MariaDB):', e);
-        // Em caso de erro, retorna array vazio para não quebrar a UI
         res.json({ novos: [], alterados: [], conflitos: [], totalExternal: 0 });
     }
 });
@@ -341,9 +335,6 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
             dateEnd = lastDay.toISOString().split('T')[0];
         }
 
-        // 1. Busca config do SQL Server Externo
-        // Se as colunas não existirem, o query pode falhar se o auto-migration não tiver rodado.
-        // O ensureSchema roda no start, mas aqui podemos tratar erro.
         const { rows: confRows } = await executeQuery(dbConfig, "SELECT ExtRoute_Host, ExtRoute_Port, ExtRoute_User, ExtRoute_Pass, ExtRoute_Database, ExtRoute_Query FROM SystemSettings WHERE ID = 1");
         const configData = confRows[0];
 
@@ -351,7 +342,6 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
             throw new Error("Configuração de banco de dados do Roteirizador não encontrada no Painel Admin.");
         }
 
-        // 2. Prepara Config do Tedious para o Banco Externo
         const externalRouteConfig = {
             server: configData.ExtRoute_Host,
             authentication: {
@@ -367,11 +357,10 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
                 encrypt: false,
                 trustServerCertificate: true,
                 rowCollectionOnRequestCompletion: true,
-                requestTimeout: 60000 // 60s timeout para query pesada
+                requestTimeout: 60000
             }
         };
 
-        // 3. Executa a Query configurada no Admin
         const query = configData.ExtRoute_Query;
         
         if (!query) {
@@ -383,7 +372,6 @@ app.get('/roteiro/previsao', authenticateToken, async (req, res) => {
             { name: 'pEndDate', type: TYPES.Date, value: dateEnd }
         ];
 
-        // Usa a função executeQuery passando a config externa
         const { rows } = await executeQuery(externalRouteConfig, query, params);
         res.json(rows);
 
@@ -461,7 +449,7 @@ app.put('/config/fuel', authenticateToken, async (req, res) => {
         ];
         await executeQuery(dbConfig, query, params);
         await executeQuery(dbConfig, "INSERT INTO LogsSistema (Usuario, Acao, Detalhes) VALUES ('API', 'CONFIG_UPDATE', 'Atualização de parâmetros de combustível')");
-        res.sendStatus(200);
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
@@ -500,7 +488,7 @@ app.delete('/ausencias/:id', authenticateToken, async (req, res) => {
     try {
         const id = req.params.id;
         await executeQuery(dbConfig, "DELETE FROM ControleAusencias WHERE ID_Ausencia = @id", [{ name: 'id', type: TYPES.Int, value: id }]);
-        res.sendStatus(200);
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
@@ -525,7 +513,7 @@ app.post('/usuarios', authenticateToken, async (req, res) => {
             { name: 'a', type: TYPES.Bit, value: Ativo }
         ];
         await executeQuery(dbConfig, query, params);
-        res.sendStatus(200);
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
@@ -549,7 +537,7 @@ app.put('/usuarios/:id', authenticateToken, async (req, res) => {
         }
         query += ` WHERE ID_Usuario = @id`;
         await executeQuery(dbConfig, query, params);
-        res.sendStatus(200);
+        res.json({ success: true });
     } catch (e) { res.status(500).json({ message: e.message }); }
 });
 
