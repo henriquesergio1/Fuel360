@@ -40,6 +40,21 @@ const calcDistance = (lat1: number, lon1: number, lat2: number, lon2: number) =>
 };
 const deg2rad = (deg: number) => deg * (Math.PI / 180);
 
+// Helper seguro para formatar data DD/MM/YYYY sem conversão de timezone (evita dia anterior)
+const formatDateString = (isoDateStr: string) => {
+    if (!isoDateStr) return '-';
+    // Pega apenas a parte YYYY-MM-DD da string, ignorando hora/fuso
+    const cleanDate = isoDateStr.split('T')[0];
+    const [y, m, d] = cleanDate.split('-');
+    return `${d}/${m}/${y}`;
+};
+
+// Helper para extrair YYYY-MM-DD seguro
+const getSafeDateKey = (isoDateStr: string) => {
+    if (!isoDateStr) return '';
+    return isoDateStr.split('T')[0];
+};
+
 interface DayRouteSummary {
     date: string;
     dayName: string;
@@ -130,13 +145,10 @@ export const Roteirizador: React.FC = () => {
             if (selectedSupervisor && String(v.Cod_Supervisor) !== selectedSupervisor) return false;
             if (selectedVendedor && String(v.Cod_Vend) !== selectedVendedor) return false;
             
-            // Filter by Date (Safety Check ensuring data matches selected range)
+            // Filter by Date (String comparison YYYY-MM-DD to avoid timezone shift)
             if (v.Data_da_Visita) {
-                try {
-                    const d = new Date(v.Data_da_Visita);
-                    const dStr = d.toISOString().split('T')[0];
-                    if (dStr < startDate || dStr > endDate) return false;
-                } catch(e) { return false; }
+                const rowDate = getSafeDateKey(v.Data_da_Visita);
+                if (rowDate < startDate || rowDate > endDate) return false;
             }
 
             return true;
@@ -158,13 +170,11 @@ export const Roteirizador: React.FC = () => {
             // Group by Date
             visits.forEach(v => {
                 if (!v.Data_da_Visita) return;
-                try {
-                    const d = new Date(v.Data_da_Visita);
-                    if (isNaN(d.getTime())) return;
-                    const dateKey = d.toISOString().split('T')[0];
-                    if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
-                    daysMap.get(dateKey)?.push(v);
-                } catch (e) {}
+                const dateKey = getSafeDateKey(v.Data_da_Visita);
+                if (!dateKey) return;
+                
+                if (!daysMap.has(dateKey)) daysMap.set(dateKey, []);
+                daysMap.get(dateKey)?.push(v);
             });
 
             const daysSummary: DayRouteSummary[] = [];
@@ -226,7 +236,7 @@ export const Roteirizador: React.FC = () => {
                         <ArrowLeftIcon className="w-4 h-4 mr-2"/> Voltar ao Relatório
                     </button>
                     <div className="text-center">
-                        <h3 className="font-bold text-slate-800">{new Date(viewingRoute.date).toLocaleDateString('pt-BR')} - {viewingRoute.dayName}</h3>
+                        <h3 className="font-bold text-slate-800">{formatDateString(viewingRoute.date)} - {viewingRoute.dayName}</h3>
                         <p className="text-xs text-slate-500">{viewingRoute.visitas.length} Pontos de Visita • {viewingRoute.kmEstimado.toFixed(1)} km est.</p>
                     </div>
                     <div className="w-20"></div>
@@ -400,7 +410,7 @@ export const Roteirizador: React.FC = () => {
                                                             <tbody className="divide-y divide-slate-50">
                                                                 {seller.days.map((day, idx) => (
                                                                     <tr key={idx} className="hover:bg-blue-50/30">
-                                                                        <td className="py-3 px-8 font-mono text-slate-700">{new Date(day.date).toLocaleDateString('pt-BR')}</td>
+                                                                        <td className="py-3 px-8 font-mono text-slate-700">{formatDateString(day.date)}</td>
                                                                         <td className="py-3 px-4 text-slate-500 uppercase font-bold text-[10px]">{day.dayName}</td>
                                                                         <td className="py-3 px-4 text-center font-bold">{day.visitas.length}</td>
                                                                         <td className="py-3 px-4 text-right font-mono text-slate-700">{day.kmEstimado.toFixed(1)} km</td>

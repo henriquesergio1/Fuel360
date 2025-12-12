@@ -124,7 +124,8 @@ const Sidebar: React.FC<SidebarProps> = ({ activeView, setView, isCollapsed, set
                 </div>
                 {!isCollapsed && (
                     <div className="mt-4 text-[10px] text-center text-slate-300 font-mono">
-                        v1.4.7
+                        v1.4.8
+                        <div className="text-[9px] text-slate-200 mt-0.5">Dev: Sérgio Oliveira</div>
                     </div>
                 )}
             </div>
