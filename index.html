@@ -44,6 +44,21 @@
         transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
         transition-duration: 200ms;
       }
+
+      /* LEAFLET FIXES - CRITICAL FOR TAILWIND */
+      .leaflet-pane img, 
+      .leaflet-tile, 
+      .leaflet-marker-icon, 
+      .leaflet-marker-shadow {
+        max-width: none !important;
+        max-height: none !important;
+        width: auto;
+        padding: 0;
+      }
+      
+      .leaflet-container {
+        z-index: 0;
+      }
     </style>
 <script type="importmap">
 {
@@ -60,6 +75,6 @@
 </head>
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-blue-100 selection:text-blue-900">
     <div id="root"></div>
-    <script type="module" src="/dist/bundle.js?v=1.4.11"></script>
+    <script type="module" src="/dist/bundle.js?v=1.4.12"></script>
   </body>
 </html>

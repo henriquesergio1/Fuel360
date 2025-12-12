@@ -99,7 +99,7 @@ export const Login: React.FC = () => {
                 </form>
                 
                 <div className="mt-8 text-center pt-4 border-t border-slate-100">
-                    <p className="text-xs text-slate-400 font-mono">v1.4.11 | Todos os direitos reservados</p>
+                    <p className="text-xs text-slate-400 font-mono">v1.4.12 | Todos os direitos reservados</p>
                 </div>
             </div>
         </div>

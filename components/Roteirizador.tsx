@@ -27,29 +27,33 @@ const MapRecenter: React.FC<{ coords: [number, number][] }> = ({ coords }) => {
     return null;
 };
 
-// Componente CRÍTICO: ResizeObserver para garantir que o mapa preencha o container
+// Componente CRÍTICO: ResizeObserver e Intervalos para garantir renderização
 const MapFix = () => {
     const map = useMap();
     
     useEffect(() => {
-        // 1. Invalida tamanho imediatamente
-        map.invalidateSize();
+        const trigger = () => {
+            map.invalidateSize({ pan: false });
+        };
 
-        // 2. Monitora mudanças no container DOM
+        // 1. Executa imediatamente
+        trigger();
+
+        // 2. Observer de redimensionamento do container
         const container = map.getContainer();
         const observer = new ResizeObserver(() => {
-            map.invalidateSize();
+            trigger();
         });
-        
         observer.observe(container);
 
-        // 3. Backup: Tenta novamente após um delay (animações CSS)
-        const timeout = setTimeout(() => {
-            map.invalidateSize();
-        }, 300);
+        // 3. Intervalo de segurança para pegar o final de animações (100ms durante 1.5s)
+        // Isso corrige o problema de tiles cinzas quando o modal abre com transição
+        const interval = setInterval(trigger, 100);
+        const timeout = setTimeout(() => clearInterval(interval), 1500);
 
         return () => {
             observer.disconnect();
+            clearInterval(interval);
             clearTimeout(timeout);
         };
     }, [map]);
@@ -262,7 +266,8 @@ export const Roteirizador: React.FC = () => {
             : [-23.55052, -46.633308];
 
         return (
-            <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative animate-fade-in">
+            // Removido animate-fade-in do container principal do mapa para evitar conflitos de layout
+            <div className="h-full flex flex-col bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden relative">
                 <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 z-10 shrink-0">
                     <button 
                         onClick={() => setViewingRoute(null)}
@@ -277,12 +282,7 @@ export const Roteirizador: React.FC = () => {
                     <div className="w-20"></div>
                 </div>
                 
-                {/* 
-                    FIX FINAL PARA MAPA:
-                    1. Altura Fixa (h-[70vh]) em vez de flex-1 para garantir que o container tenha tamanho definido no DOM.
-                    2. MapFix com ResizeObserver para invalidar tamanho se mudar.
-                    3. z-0 para contexto de empilhamento.
-                */}
+                {/* Container do Mapa: Altura fixa 70vh garante espaço */}
                 <div className="w-full h-[70vh] bg-slate-100 relative z-0">
                     <MapContainer 
                         key={viewingRoute.date}
